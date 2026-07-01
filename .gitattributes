@@ -1,0 +1,31 @@
+# 텍스트 소스 파일은 줄바꿈을 자동 정규화하되, 저장소 내에서는 CRLF로 통일 (Windows/Visual Studio 표준)
+* text=auto eol=crlf
+
+# 언리얼 바이너리 에셋 — diff/merge 대상에서 제외 (텍스트 병합 시도 시 파일 손상 위험)
+*.uasset binary
+*.umap binary
+*.upk binary
+*.udk binary
+
+# 소스 아트 / 미디어 바이너리
+*.fbx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.psd binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.ttf binary
+*.otf binary
+
+# 스크립트/설정 텍스트 파일
+*.cpp text
+*.h text
+*.cs text
+*.ini text
+*.json text
+*.md text
+*.uproject text
+*.uplugin text
