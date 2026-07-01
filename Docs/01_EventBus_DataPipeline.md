@@ -20,7 +20,7 @@
 - `EEventSeverity Severity`
 - `FGuid ActorID`
 - `EActorType ActorType`
-- `FName AnomalyCode` (`Code:001` 교착상태, `Code:002` 세이프티존 침범, `Code:003` 예방정비 미실시 누적, `Code:004` 선반 포화로 입고 정지)
+- `FName AnomalyCode` (`Code:001` 교착상태, `Code:002` 세이프티존 침범, `Code:003` 예방정비 미실시 누적, `Code:004` 선반 포화로 입고 정지, `Code:005` 로봇 고장 발생)
 - `FVector Location`
 - `FVector Velocity`
 - `FVector TargetLocation`
