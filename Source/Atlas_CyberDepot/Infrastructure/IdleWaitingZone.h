@@ -17,9 +17,7 @@ enum class EZoneMaintenanceState : uint8
 	Active
 };
 
-// Docs/06_Infrastructure.md §6 — 4단계 대상. 아틀라스/운송로봇 전용 대기 공간 + 배치 정비.
-// FindRestedOccupant/ShouldDispatchNPCForMaintenance/OnBatchMaintenanceProgress는
-// AFactoryAgentBase에 IsMaintenanceDue()/OperationCount가 없어(5단계 서브클래스 전용) 지금은 스텁이다.
+// Docs/06_Infrastructure.md §6 — 4단계 대상(정비 판정 연동은 6단계에서 완성). 아틀라스/운송로봇 전용 대기 공간 + 배치 정비.
 UCLASS()
 class AIdleWaitingZone : public AActor
 {
@@ -72,8 +70,7 @@ private:
 	UPROPERTY()
 	TArray<TWeakObjectPtr<AFactoryAgentBase>> BatchMaintenanceTargetSet;
 
-	// AFactoryNPCHuman이 아직 어디에도 UCLASS로 선언돼 있지 않아(5단계) UPROPERTY로 반영하지 않는다.
-	// TWeakObjectPtr는 UPROPERTY 없이도 댕글링 없이 안전하다.
+	UPROPERTY()
 	TWeakObjectPtr<AFactoryNPCHuman> BatchMaintenanceNPC;
 
 	FTimerHandle RestDecayTimerHandle;

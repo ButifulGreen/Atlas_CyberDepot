@@ -2,6 +2,8 @@
 
 #include "Infrastructure/IdleWaitingZone.h"
 #include "Agent/FactoryAgentBase.h"
+#include "Agent/FactoryNPCHuman.h"
+#include "Assignment/SmartFactoryManager.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -36,6 +38,12 @@ bool AIdleWaitingZone::TryReserveSlot(AFactoryAgentBase* Agent, FTransform& OutS
 			SlotOccupancy.Add(SlotIndex, Agent);
 			OutSlotTransform = ParkingSlots[SlotIndex];
 			Agent->bIsParkedInIdleZone = true;
+
+			if (AMSmartFactoryManager* Manager = GetWorld() ? GetWorld()->GetGameState<AMSmartFactoryManager>() : nullptr)
+			{
+				Manager->OnAgentBecameIdle(Agent);
+			}
+
 			return true;
 		}
 	}
@@ -78,20 +86,59 @@ bool AIdleWaitingZone::IsAgentParked(const AFactoryAgentBase* Agent) const
 
 AFactoryAgentBase* AIdleWaitingZone::FindRestedOccupant() const
 {
-	// AFactoryAgentBase에는 OperationCount/MaintenanceThreshold가 없다(아틀라스/운송로봇 서브클래스 전용,
-	// Docs/04_Agent_AI.md 5단계). 그 서브클래스가 생기면 여기서 실제 판정을 채운다.
+	for (const auto& Pair : SlotOccupancy)
+	{
+		AFactoryAgentBase* Agent = Pair.Value.Get();
+		if (Agent && Agent->GetOperationRatio() <= FullyRestedThresholdRatio)
+		{
+			return Agent;
+		}
+	}
+
 	return nullptr;
 }
 
 void AIdleWaitingZone::OnRestDecayInterval()
 {
-	// OperationCount 감쇠도 서브클래스 전용 필드라 5단계에서 채운다.
+	for (const auto& Pair : SlotOccupancy)
+	{
+		if (AFactoryAgentBase* Agent = Pair.Value.Get())
+		{
+			Agent->ApplyRestDecay(RestDecayAmountPerInterval);
+		}
+	}
+
+	OnBatchMaintenanceProgress();
+
+	if (ShouldDispatchNPCForMaintenance())
+	{
+		if (AMSmartFactoryManager* Manager = GetWorld() ? GetWorld()->GetGameState<AMSmartFactoryManager>() : nullptr)
+		{
+			if (AFactoryNPCHuman* NPC = Manager->FindNearestAvailableNPC(GetActorLocation()))
+			{
+				BeginBatchMaintenance(NPC);
+			}
+		}
+	}
 }
 
 bool AIdleWaitingZone::ShouldDispatchNPCForMaintenance() const
 {
-	// IsMaintenanceDue()가 서브클래스 전용이라 지금은 항상 false — 5단계에서 실제 조건으로 교체한다.
-	return false;
+	if (SlotOccupancy.Num() == 0 || MaintenanceState != EZoneMaintenanceState::Idle)
+	{
+		return false;
+	}
+
+	for (const auto& Pair : SlotOccupancy)
+	{
+		const AFactoryAgentBase* Agent = Pair.Value.Get();
+		if (!Agent || !Agent->IsMaintenanceDue())
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 void AIdleWaitingZone::BeginBatchMaintenance(AFactoryNPCHuman* NPC)
@@ -108,8 +155,13 @@ void AIdleWaitingZone::BeginBatchMaintenance(AFactoryNPCHuman* NPC)
 	MaintenanceState = EZoneMaintenanceState::Active;
 	BatchMaintenanceNPC = NPC;
 
-	// NPC->AssignMaintenance(FirstTarget, ERepairType::QuickCheck) 호출은
-	// AFactoryNPCHuman이 구현되는 5단계에서 연결한다.
+	if (NPC && BatchMaintenanceTargetSet.Num() > 0)
+	{
+		if (AFactoryAgentBase* FirstTarget = BatchMaintenanceTargetSet[0].Get())
+		{
+			NPC->AssignMaintenance(FirstTarget, ERepairType::QuickCheck);
+		}
+	}
 }
 
 void AIdleWaitingZone::OnBatchTargetLeft(AFactoryAgentBase* Agent)
@@ -132,7 +184,12 @@ void AIdleWaitingZone::OnBatchTargetLeft(AFactoryAgentBase* Agent)
 
 void AIdleWaitingZone::OnBatchMaintenanceProgress()
 {
-	// 개별 로봇의 IsMaintenanceDue()==false 전환 감지는 서브클래스 전용이라 5단계에서 채운다.
+	BatchMaintenanceTargetSet.RemoveAll([](const TWeakObjectPtr<AFactoryAgentBase>& Entry)
+	{
+		const AFactoryAgentBase* Agent = Entry.Get();
+		return !Agent || !Agent->IsMaintenanceDue();
+	});
+
 	if (BatchMaintenanceTargetSet.Num() == 0 && MaintenanceState == EZoneMaintenanceState::Active)
 	{
 		EndBatchMaintenance();
@@ -141,7 +198,11 @@ void AIdleWaitingZone::OnBatchMaintenanceProgress()
 
 void AIdleWaitingZone::EndBatchMaintenance()
 {
-	// NPC 복귀 지시 호출은 AFactoryNPCHuman이 구현되는 5단계에서 연결한다.
+	if (AFactoryNPCHuman* NPC = BatchMaintenanceNPC.Get())
+	{
+		NPC->ReturnToOfficeRoom();
+	}
+
 	BatchMaintenanceTargetSet.Reset();
 	MaintenanceState = EZoneMaintenanceState::Idle;
 	BatchMaintenanceNPC.Reset();

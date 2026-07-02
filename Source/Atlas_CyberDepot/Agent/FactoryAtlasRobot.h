@@ -66,7 +66,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item")
 	FName HeldItemSocketName = TEXT("ItemSocket");
 
-	bool IsMaintenanceDue() const;
+	virtual bool IsMaintenanceDue() const override;
+	virtual float GetOperationRatio() const override;
+	virtual void ApplyRestDecay(int32 Amount) override;
 	bool IsEligibleForQuickCheck() const;
 	void AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff = false);
 	void EvaluateRotationOrContinue();
