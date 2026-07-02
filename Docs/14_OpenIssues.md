@@ -18,6 +18,9 @@
 - `UCongestionHeatmapSubsystem`의 `UpdateIntervalSeconds`(예시 8초), `DecayRatePerUpdate`(예시 0.85)는 가안이며, 실제 플레이 규모(로봇 약 30대)에서 시각적으로 의미 있는 값인지 구현 후 튜닝이 필요하다.
 - `AIdleWaitingZone`의 `RestDecayIntervalSeconds`(예시 10초)·`RestDecayAmountPerInterval`(예시 10)·`FullyRestedThresholdRatio`(예시 0.2)와 각 로봇의 `MaintenanceThreshold`는 상호 균형이 중요하다. 실제 로봇 운용 규모에서 플레이테스트 후 튜닝 필요.
 - `HandoffStationAssignment`를 소프트 핸드오프로 바꿨지만, To가 스테이징 지점에서 대기하는 동안 제3의 아틀라스가 해당 스테이징 지점을 우연히 지나가는 경합은 발생하지 않는지(스테이징 지점은 점유 예약 대상이 아니므로) 구현 후 검증 필요.
+- (10단계 신규) `UBenchmarkHarnessSubsystem::RecordPerfSample`의 `NavigationTickTimeMs`는 대응하는 공개 전역 카운터가 없어 항상 0 — 실측은 `stat navigation` 수동 확인에 계속 의존한다.
+- (10단계 신규) `RunScalingComparison`/`StartForcedDeadlockDemo`는 레벨/내비메시가 없는 기획단계 특성상 코드 구조만 완성됐고 실기 계측·시연 테스트는 못 했다. 레벨이 만들어지면 `AgentClassToSpawn`/`SpawnOrigin` 등 밸런싱 값을 실제 레벨에 맞게 조정하고 재검증 필요.
+- (10단계 신규) `UReplayPlaybackSubsystem`이 방출하는 `FOnPlaybackFrame` 델리게이트를 실제 화면에 어떻게 시각화(고스트 액터 스폰 등)할지는 미정 — 소비자 측 설계가 필요하다.
 
 ## 검토 후 미채택 사항 (근거 포함)
 
