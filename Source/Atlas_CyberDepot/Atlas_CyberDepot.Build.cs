@@ -7,11 +7,7 @@ public class Atlas_CyberDepot : ModuleRules
 	public Atlas_CyberDepot(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-
-		// BuildSettingsVersion.V7 하에서는 모듈 루트가 include 경로에 자동으로 추가되지 않아,
-		// 코드베이스 전체가 쓰는 "Agent/X.h" 같은 모듈-상대 include 스타일을 위해 명시적으로 추가한다.
-		PublicIncludePaths.Add(ModuleDirectory);
-
+	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "AIModule", "NavigationSystem" });

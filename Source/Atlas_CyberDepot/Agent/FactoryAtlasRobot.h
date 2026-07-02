@@ -10,7 +10,7 @@
 class ALogisticsItem;
 class URepairProgressComponent;
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct FPendingSlotReservation
 {
 	GENERATED_BODY()

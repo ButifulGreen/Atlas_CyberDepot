@@ -82,14 +82,14 @@ void AFactoryNPCHuman::ReturnToOfficeRoom()
 	SetState(EAgentState::Moving);
 }
 
-bool AFactoryNPCHuman::TryPossessByPlayer(APlayerController* RequestingController)
+bool AFactoryNPCHuman::TryPossessByPlayer(APlayerController* Controller)
 {
-	if (!RequestingController || RequestingController->GetPawn() == this)
+	if (!Controller || Controller->GetPawn() == this)
 	{
 		return false;
 	}
 
-	RequestingController->Possess(this);
+	Controller->Possess(this);
 	return true;
 }
 
@@ -97,16 +97,4 @@ void AFactoryNPCHuman::CallToOfficeExit()
 {
 	PatrolState = EPatrolState::InOffice;
 	StartPatrol();
-}
-
-bool AFactoryNPCHuman::CanBePossessedBy(APlayerController* RequestingController) const
-{
-	const APlayerController* CurrentPlayerController = Cast<APlayerController>(GetController());
-	return !CurrentPlayerController || CurrentPlayerController == RequestingController;
-}
-
-void AFactoryNPCHuman::ReleasePossession()
-{
-	// AutoPossessAI/AIControllerClass 설정에 따라 AI 제어를 되찾는다(레벨 배치 시 설정 필요 — 8단계 범위 밖).
-	SpawnDefaultController();
 }
