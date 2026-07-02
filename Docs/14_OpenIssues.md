@@ -9,7 +9,12 @@
 - (8단계 신규) `AFactoryNPCHuman::ReleasePossession()`은 `SpawnDefaultController()`로 AI 제어 복귀를 시도하는데, 이는 각 로봇/NPC 액터의 `AutoPossessAI`/`AIControllerClass` 설정이 레벨/블루프린트에서 되어 있어야 실제로 동작한다 — 현재 코드베이스에는 이 설정이 어디에도 없어 실기 확인이 필요하다.
 - (8단계 신규) Enhanced Input 에셋(`IA_Interact`, 매핑 컨텍스트)은 코드로 생성할 수 없어 에디터에서 별도 제작 필요.
 - 선반 포화 해소 수단 중 "폐기 처리"의 구체 설계(전용 구역/트레이 위치, 폐기 트리거 방식, 폐기된 물품의 후속 처리)는 미정이다.
-- `UFactoryDashboardWidget`(관제실)의 인게임 접근 방식 — 특정 위치에 진입해야 여는 형태인지, 아무 위치에서나 단축키로 호출 가능한 형태인지 — 는 미정이다.
+- `UFactoryDashboardWidget`(관제실)의 인게임 접근 방식 — 특정 위치에 진입해야 여는 형태인지, 아무 위치에서나 단축키로 호출 가능한 형태인지 — 는 미정이다. (9단계에서도 미구현 확정, 후순위 유지)
+- (9단계 신규) `UCoopRoleHUDWidget`은 8단계에서 `EPlayerRole`이 제거되며 구현하지 않기로 확정했다(`Docs/09_Visualization.md`).
+- (9단계 신규) `AMyMQTTClient`가 실제 브로커에 연결할 언리얼 MQTT 플러그인이 아직 선택/설치되지 않았다 — 큐잉/JSON 직렬화/키오스크 수신 디스패치까지만 구현되고, `Connect()`/`FlushPendingQueue()`의 실제 소켓 발행은 `TODO`로 남아있다(`Docs/11_MQTT.md`).
+- (9단계 신규) MQTT 토픽 이름(`atlas_cyberdepot/anomaly` 등)과 JSON 필드 대소문자(`FJsonObjectConverter` 기본 변환 규칙)는 실제 브로커 연동 테스트 전까지 잠정치다 — 플러그인 연결 시 재검증 필요.
+- (9단계 신규) `UAgentStatusIndicatorWidget`을 에이전트 머리 위에 실제로 부착하는 `UWidgetComponent` 배치는 에디터/Content 작업으로 남아있다.
+- (9단계 신규) `UMinimapWidget`/`UAgentStatusIndicatorWidget`의 실제 드로잉은 `BlueprintImplementableEvent`만 정의돼 있고, UMG 디자이너에서 위젯 블루프린트를 만들어 구현해야 한다.
 - `UCongestionHeatmapSubsystem`의 `UpdateIntervalSeconds`(예시 8초), `DecayRatePerUpdate`(예시 0.85)는 가안이며, 실제 플레이 규모(로봇 약 30대)에서 시각적으로 의미 있는 값인지 구현 후 튜닝이 필요하다.
 - `AIdleWaitingZone`의 `RestDecayIntervalSeconds`(예시 10초)·`RestDecayAmountPerInterval`(예시 10)·`FullyRestedThresholdRatio`(예시 0.2)와 각 로봇의 `MaintenanceThreshold`는 상호 균형이 중요하다. 실제 로봇 운용 규모에서 플레이테스트 후 튜닝 필요.
 - `HandoffStationAssignment`를 소프트 핸드오프로 바꿨지만, To가 스테이징 지점에서 대기하는 동안 제3의 아틀라스가 해당 스테이징 지점을 우연히 지나가는 경합은 발생하지 않는지(스테이징 지점은 점유 예약 대상이 아니므로) 구현 후 검증 필요.

@@ -19,4 +19,8 @@
   - `void PublishSnapshot(const FStateSnapshot& Snapshot)` (발행 실패 시 `PendingPublishQueue`에 적재)
   - `void PublishTaskLifecycleEvent(const FTaskLifecycleEvent& Event)` (발행 실패 시 `PendingPublishQueue`에 적재)
   - `void FlushPendingQueue()` (재연결 시 `PendingPublishQueue`에 쌓인 메시지를 순서대로 재발행 후 큐 비움)
-  - `void OnKioskOrderReceived(const FString& JsonPayload)`
+  - `void OnKioskOrderReceived(const FString& JsonPayload)` (`Docs/02_Multiplayer_RPC.md`의 `FKioskOrderRequest`로 역직렬화 후, `AFactoryPlayerController::Server_SubmitKioskOrder`와 동일한 공용 함수 `ApplyKioskOrderRequest(UWorld*, const FKioskOrderRequest&)`(`FactoryKioskTerminal.h`)를 호출한다 — 현실 키오스크는 플레이어 컨트롤러를 거치지 않으므로 거리 검증 없이 서브시스템을 바로 호출)
+
+> **9단계 구현 비고**: 실제 MQTT 브로커 연결에 쓸 언리얼 플러그인은 아직 선택/설치되지 않았다(`Docs/14_OpenIssues.md`). 이번 단계는 `PendingPublishQueue` 큐잉, `FJsonObjectConverter`를 이용한 `FAnomalyEvent`/`FStateSnapshot`/`FTaskLifecycleEvent` → JSON 직렬화, `OnKioskOrderReceived`의 역직렬화·디스패치까지만 구현했다. `Connect()`/`FlushPendingQueue()`/`TryPublish()` 내부의 실제 소켓 발행 호출은 플러그인 설치 후 채울 `TODO`로 남겨뒀고, 그때까지 `bIsConnected`는 항상 `false`이므로 모든 발행 요청이 큐에 적재된다.
+>
+> **토픽 이름 규칙**: Docs에 명시돼 있지 않아 구현 시 `atlas_cyberdepot/anomaly`, `atlas_cyberdepot/snapshot`, `atlas_cyberdepot/task_lifecycle`로 정했다(`MyMQTTClient.cpp`, `RaspberryPi/main.py` 양쪽에서 동일하게 사용).

@@ -57,3 +57,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Kiosk")
 	TObjectPtr<UBoxComponent> InteractCollision;
 };
+
+// 8/9단계 공용 — 인게임 RPC(AFactoryPlayerController::Server_SubmitKioskOrder)와 외부 현실 키오스크
+// 경로(AMyMQTTClient::OnKioskOrderReceived) 양쪽에서 동일한 처리 결과를 보장하기 위해 분리했다.
+bool ApplyKioskOrderRequest(UWorld* World, const FKioskOrderRequest& Request);

@@ -17,11 +17,14 @@
 ### `FCongestionCell` (USTRUCT)
 - `FIntPoint GridCoord`, `float Score`, `bool bHasActiveAnomaly` (고장/정비 발생 경로 마킹용)
 
+> **구현 비고**: `TickRecompute(float DeltaTime)`는 `UCongestionHeatmapSubsystem`이 `FTickableGameObject`를 함께 상속해 매 틱 호출되며, 내부에서 경과 시간을 누적하다가 `UpdateIntervalSeconds`에 도달했을 때만 감쇠 연산을 수행한다("매 틱 연산 금지" 요구사항 충족). `FVector Location`을 그리드 셀로 변환하는 단위 크기는 Docs에 없어 `GridCellSize`(밸런싱 값, 기본 200)로 노출했다. `bHasActiveAnomaly` 마킹은 `UpdateIntervalSeconds` 주기마다 함께 정리(초기화)된다.
+
 ### `UMinimapWidget` (UUserWidget)
 - 멤버: `UCongestionHeatmapSubsystem* HeatmapSource`
 - 함수: `void RefreshOverlay()`, `void OnAnomalyMarkerAdded(const FAnomalyEvent& Event)`
 
 ### `UFactoryDashboardWidget` (UUserWidget) — "관제실" 전체화면, 2차 목표
+- 9단계에서는 미구현. MVP(미니맵)만 우선 구현하고 이 위젯은 후순위로 미룬다(`Docs/14_OpenIssues.md`).
 - 멤버: 재고 패널, 주문 큐 패널, 로봇 상태 리스트, 최근 이상 징후 로그 (각각 하위 위젯 참조)
 - 함수
   - `void RefreshAll()`
@@ -31,7 +34,7 @@
 ### `UAgentStatusIndicatorWidget` (UUserWidget, 에이전트 머리 위 부착)
 - 멤버: `EAgentState DisplayedState`, `float RepairProgressDisplay`
 - 함수: `void BindToAgent(AFactoryAgentBase* Agent)`
+- `NativeTick`에서 `BoundAgent`의 `CurrentState`/`GetRepairComponent()->RepairProgress`를 매 프레임 폴링해 갱신한다. 실제 에이전트 머리 위 부착(`UWidgetComponent` 배치)은 에디터 작업으로 남아있다(`Docs/14_OpenIssues.md`).
 
-### `UCoopRoleHUDWidget` (UUserWidget)
-- 멤버: `EPlayerRole LocalRole`, `TArray<FRemotePlayerStatus> OtherPlayers`
-- 함수: `void RefreshRemoteStatuses()`
+### ~~`UCoopRoleHUDWidget`~~ (제거됨)
+8단계에서 `EPlayerRole`/역할 배정 체계 자체가 제거되어(`Docs/02_Multiplayer_RPC.md`), 이 위젯은 더 이상 의미가 없어 9단계에서 구현하지 않는다. 다른 플레이어의 빙의 상태가 필요해지면 `UAgentStatusIndicatorWidget`처럼 대상 폰을 직접 바인딩하는 형태로 별도 설계한다.

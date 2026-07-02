@@ -14,11 +14,9 @@ public class Atlas_CyberDepot : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "AIModule", "NavigationSystem" });
+		// 9단계(Docs/09_Visualization.md) UMG 위젯, Docs/11_MQTT.md JSON 직렬화용
+		PrivateDependencyModuleNames.AddRange(new string[] { "AIModule", "NavigationSystem", "UMG", "Slate", "SlateCore", "Json", "JsonUtilities" });
 
-		// Uncomment if you are using Slate UI
-		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
-		
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");
 

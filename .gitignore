@@ -467,3 +467,9 @@ FodyWeavers.xsd
 /Intermediate/
 Atlas_CyberDepot.slnx
 Automation_Atlas_CyberDepot.slnx
+
+### RaspberryPi (Docs/12_RaspberryPi.md) ###
+# main.py가 런타임에 생성하는 CSV 로그 산출물 — 소스 아님
+/RaspberryPi/logs/
+/RaspberryPi/__pycache__/
+/RaspberryPi/.venv/
