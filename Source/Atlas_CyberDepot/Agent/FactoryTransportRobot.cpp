@@ -8,6 +8,8 @@
 #include "Infrastructure/IdleWaitingZone.h"
 #include "Navigation/CostZoneVolume.h"
 #include "Assignment/OutboundDispatchSubsystem.h"
+#include "Assignment/SmartFactoryManager.h"
+#include "Repair/RepairProgressComponent.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -15,6 +17,7 @@
 AFactoryTransportRobot::AFactoryTransportRobot()
 {
 	AgentType = EActorType::TransportRobot;
+	RepairComponent = CreateDefaultSubobject<URepairProgressComponent>(TEXT("RepairComponent"));
 }
 
 bool AFactoryTransportRobot::IsMaintenanceDue() const
@@ -136,6 +139,14 @@ void AFactoryTransportRobot::EvaluateRotationOrContinue()
 				Event.Location = GetActorLocation();
 				Event.RiskValue = ComputeCurrentBreakdownChance();
 				EventBus->PublishAnomaly(Event);
+			}
+		}
+
+		if (UWorld* World = GetWorld())
+		{
+			if (AMSmartFactoryManager* Manager = World->GetGameState<AMSmartFactoryManager>())
+			{
+				Manager->RequestMaintenance(this, ERepairType::FullRepair);
 			}
 		}
 		return;

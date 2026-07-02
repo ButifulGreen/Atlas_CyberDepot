@@ -6,6 +6,8 @@
 #include "Infrastructure/HorizontalTray.h"
 #include "Infrastructure/IdleWaitingZone.h"
 #include "Assignment/OutboundDispatchSubsystem.h"
+#include "Assignment/SmartFactoryManager.h"
+#include "Repair/RepairProgressComponent.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -13,6 +15,7 @@
 AFactoryAtlasRobot::AFactoryAtlasRobot()
 {
 	AgentType = EActorType::AtlasRobot;
+	RepairComponent = CreateDefaultSubobject<URepairProgressComponent>(TEXT("RepairComponent"));
 }
 
 bool AFactoryAtlasRobot::IsMaintenanceDue() const
@@ -92,6 +95,14 @@ void AFactoryAtlasRobot::EvaluateRotationOrContinue()
 				Event.Location = GetActorLocation();
 				Event.RiskValue = ComputeCurrentBreakdownChance();
 				EventBus->PublishAnomaly(Event);
+			}
+		}
+
+		if (UWorld* World = GetWorld())
+		{
+			if (AMSmartFactoryManager* Manager = World->GetGameState<AMSmartFactoryManager>())
+			{
+				Manager->RequestMaintenance(this, ERepairType::FullRepair);
 			}
 		}
 		return;
