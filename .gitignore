@@ -460,6 +460,11 @@ FodyWeavers.xsd
 # 블루프린트는 살리고, 대용량 에셋 폴더만 정밀 타격해서 제외
 /Content/NewAssets/
 
+# 월드 파티션 외부 액터/오브젝트 — 저장소만으로는 대용량 에셋을 못 받는 환경이라
+# 어중간하게 추적해도 클론 시 온전한 레벨이 안 되므로 제외
+/Content/__ExternalActors__/
+/Content/__ExternalObjects__/
+
 # 엔진/에디터 산출물
 /Saved/
 /Binaries/
