@@ -4,8 +4,6 @@
 #include "Player/FactorySpectatorPawn.h"
 #include "Agent/FactoryAgentBase.h"
 #include "Agent/FactoryNPCHuman.h"
-#include "Assignment/InventoryOrderSubsystem.h"
-#include "Assignment/DeliveryOrderSubsystem.h"
 #include "Repair/RepairProgressComponent.h"
 
 void AFactoryPlayerController::OnPossess(APawn* InPawn)
@@ -56,29 +54,7 @@ void AFactoryPlayerController::Server_SubmitKioskOrder_Implementation(AFactoryKi
 		return;
 	}
 
-	switch (Request.RequestType)
-	{
-	case EOrderRequestType::Inbound:
-		if (UInventoryOrderSubsystem* Inventory = World->GetSubsystem<UInventoryOrderSubsystem>())
-		{
-			Inventory->TryPlaceOrder(Request.ItemType, Request.Quantity);
-		}
-		break;
-
-	case EOrderRequestType::OutboundApproval:
-		if (UDeliveryOrderSubsystem* Delivery = World->GetSubsystem<UDeliveryOrderSubsystem>())
-		{
-			Delivery->TryAcceptOrder(Request.TargetOrderID);
-		}
-		break;
-
-	case EOrderRequestType::Cancel:
-		if (UDeliveryOrderSubsystem* Delivery = World->GetSubsystem<UDeliveryOrderSubsystem>())
-		{
-			Delivery->TryCancelOrder(Request.TargetOrderID);
-		}
-		break;
-	}
+	ApplyKioskOrderRequest(World, Request);
 }
 
 void AFactoryPlayerController::Server_JoinRepair_Implementation(UActorComponent* TargetRepairComponent)
