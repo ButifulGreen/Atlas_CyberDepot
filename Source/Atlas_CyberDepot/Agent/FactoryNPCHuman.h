@@ -50,6 +50,14 @@ public:
 	void StartPatrol();
 	void AssignMaintenance(AFactoryAgentBase* Target, ERepairType RepairType);
 	void ReturnToOfficeRoom();
-	bool TryPossessByPlayer(APlayerController* Controller);
+	bool TryPossessByPlayer(APlayerController* RequestingController);
 	void CallToOfficeExit();
+
+	// 8단계(Docs/02_Multiplayer_RPC.md) — 다른 플레이어가 이미 빙의 중인지만 확인한다.
+	// AI 상태(정비/순찰 등)는 가로채기 허용 정책에 따라 체크하지 않는다.
+	bool CanBePossessedBy(APlayerController* RequestingController) const;
+
+	// 8단계 — 관전자 복귀 처리. AFactoryPlayerController::Server_ReleaseNPC가 자신의 관전자 폰을
+	// 다시 Possess하기 직전에 호출해, 이 NPC는 AI 제어로 복귀시킨다.
+	void ReleasePossession();
 };
