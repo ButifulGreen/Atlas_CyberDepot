@@ -5,7 +5,7 @@
 ### `UInventoryOrderSubsystem` (UWorldSubsystem)
 - 멤버: `TMap<EItemType, FStockLineState> StockLines`
 - 함수
-  - `bool TryPlaceOrder(EItemType ItemType, int32 Quantity)` (KioskOperator의 `Server_SubmitKioskOrder` 경유로만 호출)
+  - `bool TryPlaceOrder(EItemType ItemType, int32 Quantity)` (8단계 — 전용 플레이어 개념이 없어져 `AFactoryPlayerController::Server_SubmitKioskOrder` 경유로 누구나 호출 가능)
   - `void OnInboundArrived(EItemType ItemType, int32 Quantity)`
   - `bool IsLineLocked(EItemType ItemType) const` (`Code:004` 선반 포화 시 true)
   - `FOnLineLockChanged OnLineLockChanged`
@@ -17,12 +17,16 @@
 - 멤버: `TArray<FDeliveryOrder> ActiveOrders`, `float OrderRefreshIntervalSeconds`
 - 함수
   - `void RefreshOrderList()`
-  - `bool TryAcceptOrder(const FGuid& OrderID)` (수락 시 `UOutboundDispatchSubsystem::DecomposeOrder` 호출)
+  - `bool TryAcceptOrder(const FGuid& OrderID)` (수락 시 `UOutboundDispatchSubsystem::DecomposeOrder` 호출. 서버 게임스레드에서 순차 처리되어 동시에 여러 플레이어/현실 키오스크가 같은 주문을 승인 시도해도 먼저 처리된 쪽만 성공 — 별도 타임스탬프 큐잉 불필요)
+  - `bool TryCancelOrder(const FGuid& OrderID)` (8단계 — `Status == Accepted`이고 `UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder`가 성공(아직 로봇 미배정)할 때만 `Status`를 `Cancelled`로 전환)
   - `void OnOrderExpired(const FGuid& OrderID)`
   - `FOnDeliveryResult OnDeliveryResult`
 
 ### `FDeliveryOrder` (USTRUCT)
 - `FGuid OrderID`, `TMap<EItemType, int32> RequestedQuantities`, `FDateTime Deadline`, `EOrderStatus Status`
+
+### `EOrderStatus` (enum)
+- `Available`, `Accepted`, `Completed`, `Expired`, `Cancelled`(8단계 추가 — 예약됐지만 아직 로봇 미배정 상태에서 취소된 주문)
 
 ### `AMSmartFactoryManager` (AGameStateBase)
 - 멤버: `float ReputationScore`

@@ -3,7 +3,11 @@
 > Atlas_CyberDepot 아키텍처 설계안 v5 — §14. 어떤 시스템을 구현하든 착수 전에 이 문서를 훑어, 해당 시스템에 걸린 미해결/미채택 사항이 있는지 확인할 것.
 
 - `ACostZoneVolume`을 NavQueryFilter 런타임 코스트 조정 방식으로 전환했지만, 그럼에도 구현 후 `stat navigation`으로 실측은 필요하다(코스트 조정 자체도 쿼리마다 계산 비용이 있으므로).
-- 키오스크 전용 플레이어가 "주문 승인" 외에 NPC 디스패치 판단 같은 추가 권한을 가질지는 `02_Multiplayer_RPC.md` 확정 시 함께 정한다.
+- ~~키오스크 전용 플레이어가 "주문 승인" 외에 NPC 디스패치 판단 같은 추가 권한을 가질지는 `02_Multiplayer_RPC.md` 확정 시 함께 정한다.~~ → 8단계에서 해소: 키오스크는 전용 플레이어가 아닌 인게임 장비로 재설계되어 전원 동일 권한(`02_Multiplayer_RPC.md`).
+- (8단계 신규) `FTransportTask::SourceOrderID`는 필드만 추가됐고 실제로 채워지지 않는다 — `UOutboundDispatchSubsystem::DecomposeOrder`가 아직 `PendingTransportTasks`를 채우는 로직이 없기 때문(`07_TaskAssignment.md`). 배정/디스패치 로직이 정교화되는 이후 단계에서 함께 채우고, 그때 운송 작업 취소 지원 여부도 재검토한다.
+- (8단계 신규) `AFactorySpectatorPawn`의 `FactoryBoundary` 콜리전 채널은 코드/설정으로 정의만 해뒀고, 실제 경계 볼륨 배치는 레벨이 만들어지는 시점(에디터 작업)으로 미뤄져 있다.
+- (8단계 신규) `AFactoryNPCHuman::ReleasePossession()`은 `SpawnDefaultController()`로 AI 제어 복귀를 시도하는데, 이는 각 로봇/NPC 액터의 `AutoPossessAI`/`AIControllerClass` 설정이 레벨/블루프린트에서 되어 있어야 실제로 동작한다 — 현재 코드베이스에는 이 설정이 어디에도 없어 실기 확인이 필요하다.
+- (8단계 신규) Enhanced Input 에셋(`IA_Interact`, 매핑 컨텍스트)은 코드로 생성할 수 없어 에디터에서 별도 제작 필요.
 - 선반 포화 해소 수단 중 "폐기 처리"의 구체 설계(전용 구역/트레이 위치, 폐기 트리거 방식, 폐기된 물품의 후속 처리)는 미정이다.
 - `UFactoryDashboardWidget`(관제실)의 인게임 접근 방식 — 특정 위치에 진입해야 여는 형태인지, 아무 위치에서나 단축키로 호출 가능한 형태인지 — 는 미정이다.
 - `UCongestionHeatmapSubsystem`의 `UpdateIntervalSeconds`(예시 8초), `DecayRatePerUpdate`(예시 0.85)는 가안이며, 실제 플레이 규모(로봇 약 30대)에서 시각적으로 의미 있는 값인지 구현 후 튜닝이 필요하다.
