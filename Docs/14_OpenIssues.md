@@ -11,7 +11,11 @@
 - 선반 포화 해소 수단 중 "폐기 처리"의 구체 설계(전용 구역/트레이 위치, 폐기 트리거 방식, 폐기된 물품의 후속 처리)는 미정이다.
 - `UFactoryDashboardWidget`(관제실)의 인게임 접근 방식 — 특정 위치에 진입해야 여는 형태인지, 아무 위치에서나 단축키로 호출 가능한 형태인지 — 는 미정이다. (9단계에서도 미구현 확정, 후순위 유지)
 - (9단계 신규) `UCoopRoleHUDWidget`은 8단계에서 `EPlayerRole`이 제거되며 구현하지 않기로 확정했다(`Docs/09_Visualization.md`).
-- (9단계 신규) `AMyMQTTClient`가 실제 브로커에 연결할 언리얼 MQTT 플러그인이 아직 선택/설치되지 않았다 — 큐잉/JSON 직렬화/키오스크 수신 디스패치까지만 구현되고, `Connect()`/`FlushPendingQueue()`의 실제 소켓 발행은 `TODO`로 남아있다(`Docs/11_MQTT.md`).
+- ~~(9단계 신규) `AMyMQTTClient`가 실제 브로커에 연결할 언리얼 MQTT 플러그인이 아직 선택/설치되지 않았다~~ → 후속 갱신에서 해소: Eclipse Paho MQTT C(`MQTTAsync`)를 서드파티로 직접 연동(`Docs/11_MQTT.md`).
+- ~~(MQTT 후속 신규) `Source/ThirdParty/PahoMQTT/`에 실제 라이브러리 파일이 아직 배치되지 않아 컴파일이 안 된다~~ → 해소: 사용자가 보유한 파일을 배치, 컴파일 확인됨.
+- (MQTT 후속 신규) 실기 브로커가 없어 `Connect()`/구독/발행 전체가 컴파일만 확인됐고 실제 연동 테스트는 못 했다.
+- (MQTT 후속 신규) `Binaries/`에는 `paho-mqtt3as.dll`/`.pdb`만 있고 OpenSSL 등 이 dll이 런타임에 의존할 수 있는 추가 라이브러리(`libssl`/`libcrypto` 등)는 확인되지 않았다 — 실행 시 로드 실패하면 별도로 구해 배치해야 할 수 있다.
+- (MQTT 후속 신규) `TryPublish`는 브로커가 발행을 사후에 거부(비동기 실패 콜백)해도 자동으로 `PendingPublishQueue`에 재적재하지 않는다 — 미연결 상태의 즉시 실패만 큐잉 대상이다.
 - (9단계 신규) MQTT 토픽 이름(`atlas_cyberdepot/anomaly` 등)과 JSON 필드 대소문자(`FJsonObjectConverter` 기본 변환 규칙)는 실제 브로커 연동 테스트 전까지 잠정치다 — 플러그인 연결 시 재검증 필요.
 - (9단계 신규) `UAgentStatusIndicatorWidget`을 에이전트 머리 위에 실제로 부착하는 `UWidgetComponent` 배치는 에디터/Content 작업으로 남아있다.
 - (9단계 신규) `UMinimapWidget`/`UAgentStatusIndicatorWidget`의 실제 드로잉은 `BlueprintImplementableEvent`만 정의돼 있고, UMG 디자이너에서 위젯 블루프린트를 만들어 구현해야 한다.
