@@ -473,3 +473,9 @@ Automation_Atlas_CyberDepot.slnx
 /RaspberryPi/logs/
 /RaspberryPi/__pycache__/
 /RaspberryPi/.venv/
+
+### ThirdParty 벤더 라이브러리 (Docs/11_MQTT.md) ###
+# 위쪽의 일반 *.lib/*.dll/*.pdb 제외 규칙에서 PahoMQTT 서드파티 바이너리만 예외로 커밋 대상에 포함
+!Source/ThirdParty/PahoMQTT/Libraries/*.lib
+!Source/ThirdParty/PahoMQTT/Binaries/*.dll
+!Source/ThirdParty/PahoMQTT/Binaries/*.pdb
