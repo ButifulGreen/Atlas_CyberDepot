@@ -44,6 +44,13 @@ public:
 	virtual void OnUnblocked();
 	FStateSnapshot ToSnapshot() const;
 
+	// AtlasRobot/TransportRobot가 각자 OperationCount/MaintenanceThreshold로 구현(override)한다.
+	// AIdleWaitingZone·AMSmartFactoryManager처럼 구체 타입을 모르는 코드가 공용으로 판정할 수 있도록
+	// 6단계에서 베이스에 추가.
+	virtual bool IsMaintenanceDue() const { return false; }
+	virtual float GetOperationRatio() const { return 0.f; }
+	virtual void ApplyRestDecay(int32 Amount) {}
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
