@@ -2,6 +2,7 @@
 
 #include "Agent/FactoryNPCHuman.h"
 #include "Agent/FactoryAIController.h"
+#include "Repair/RepairProgressComponent.h"
 #include "NavigationSystem.h"
 #include "GameFramework/PlayerController.h"
 
@@ -38,6 +39,7 @@ void AFactoryNPCHuman::AssignMaintenance(AFactoryAgentBase* Target, ERepairType 
 	}
 
 	AssignedMaintenanceTarget = Target;
+	SetState(EAgentState::UnderRepair);
 
 	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
 	{
@@ -45,7 +47,12 @@ void AFactoryNPCHuman::AssignMaintenance(AFactoryAgentBase* Target, ERepairType 
 		AIController->RequestMoveWithFilter(Target->GetActorLocation());
 	}
 
-	// 실제 정비 참여(URepairProgressComponent::Server_JoinRepair)는 컴포넌트가 생기는 7단계에서 연결한다.
+	// 정확한 도착 판정(이동 완료 콜백)은 아직 없어, 배정 시점에 바로 참여시키는 것으로 단순화했다.
+	if (URepairProgressComponent* RepairComponent = Target->GetRepairComponent())
+	{
+		RepairComponent->CurrentRepairType = RepairType;
+		RepairComponent->Server_JoinRepair(this);
+	}
 }
 
 void AFactoryNPCHuman::ReturnToOfficeRoom()
@@ -58,6 +65,12 @@ void AFactoryNPCHuman::ReturnToOfficeRoom()
 		{
 			AIController->SetAvoidanceIgnoreActor(AssignedMaintenanceTarget, false);
 		}
+
+		if (URepairProgressComponent* RepairComponent = AssignedMaintenanceTarget->GetRepairComponent())
+		{
+			RepairComponent->Server_LeaveRepair(this);
+		}
+
 		AssignedMaintenanceTarget = nullptr;
 	}
 

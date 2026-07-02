@@ -4,6 +4,7 @@
 #include "Agent/FactoryAgentBase.h"
 #include "Agent/FactoryNPCHuman.h"
 #include "Infrastructure/IdleWaitingZone.h"
+#include "Repair/RepairProgressComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 
@@ -23,7 +24,7 @@ AFactoryNPCHuman* AMSmartFactoryManager::FindNearestAvailableNPC(const FVector& 
 	for (AActor* Actor : FoundNPCs)
 	{
 		AFactoryNPCHuman* NPC = Cast<AFactoryNPCHuman>(Actor);
-		// 빙의 여부/FullRepair 진행 중 여부는 URepairProgressComponent가 생기는 7단계에서 정교화한다.
+		// 이미 정비 중인 NPC는 제외한다. 플레이어 빙의 여부까지 구분하는 건 8단계 멀티플레이어에서 정교화한다.
 		if (!NPC || NPC->CurrentState == EAgentState::UnderRepair)
 		{
 			continue;
@@ -47,13 +48,21 @@ void AMSmartFactoryManager::RequestMaintenance(AFactoryAgentBase* Agent, ERepair
 		return;
 	}
 
+	// 이미 참여 중인 정비자(AI든 빙의 플레이어든)가 있으면 추가 AI NPC를 배정하지 않는다.
+	if (URepairProgressComponent* ExistingRepair = Agent->GetRepairComponent())
+	{
+		if (ExistingRepair->GetValidRepairerCount() > 0)
+		{
+			return;
+		}
+	}
+
 	AFactoryNPCHuman* NPC = FindNearestAvailableNPC(Agent->GetActorLocation());
 	if (!NPC)
 	{
 		return;
 	}
 
-	// 로봇에 AI NPC가 이미 배정돼 있는지는 URepairProgressComponent가 생기는 7단계에서 확인한다.
 	NPC->AssignMaintenance(Agent, RepairType);
 }
 

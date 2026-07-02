@@ -7,6 +7,8 @@
 #include "EventBus/FactoryEventTypes.h"
 #include "FactoryAgentBase.generated.h"
 
+class URepairProgressComponent;
+
 // Docs/04_Agent_AI.md §4 — 아틀라스/운송로봇/NPC 공용 베이스. 2단계(스켈레톤) 대상.
 UCLASS()
 class AFactoryAgentBase : public ACharacter
@@ -50,6 +52,15 @@ public:
 	virtual bool IsMaintenanceDue() const { return false; }
 	virtual float GetOperationRatio() const { return 0.f; }
 	virtual void ApplyRestDecay(int32 Amount) {}
+
+	// URepairProgressComponent::OnRepairCompleted가 호출 — 고장 직전 진행 중이던 작업을 이어서 재개한다는
+	// 00_DesignPrinciples.md 원칙에 따라 기본은 Idle 전환뿐이고, CurrentAssignment/PendingSlotReservation은
+	// 고장 중에도 그대로 보존돼 있어 별도 복원 로직 없이 다음 EvaluateRotationOrContinue 호출에서 이어진다.
+	virtual void ResumeAfterRepair() { SetState(EAgentState::Idle); }
+
+	// AtlasRobot/TransportRobot가 자신의 RepairComponent를 반환하도록 override한다.
+	// AFactoryNPCHuman::AssignMaintenance처럼 구체 타입을 모르는 코드가 접근할 수 있도록 6단계에 이어 추가.
+	virtual URepairProgressComponent* GetRepairComponent() const { return nullptr; }
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

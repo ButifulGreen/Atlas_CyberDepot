@@ -69,6 +69,7 @@ public:
 	virtual bool IsMaintenanceDue() const override;
 	virtual float GetOperationRatio() const override;
 	virtual void ApplyRestDecay(int32 Amount) override;
+	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
 	bool IsEligibleForQuickCheck() const;
 	void AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff = false);
 	void EvaluateRotationOrContinue();
