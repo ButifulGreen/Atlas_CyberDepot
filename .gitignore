@@ -484,3 +484,8 @@ Automation_Atlas_CyberDepot.slnx
 !Source/ThirdParty/PahoMQTT/Libraries/*.lib
 !Source/ThirdParty/PahoMQTT/Binaries/*.dll
 !Source/ThirdParty/PahoMQTT/Binaries/*.pdb
+
+### 프로젝트 기타 추적제외 ###
+# 프로젝트 에셋을 공유받지 않는 이상 저장소 파일만으로 구현이 불가능. 이에 용량 축소를 위해 추가적인 추적제외목록 추가
+/Content/Atlas_CyberDepot.umap
+/Content/Atlas_CyberDepot_HLOD0_Instancing.uasset
