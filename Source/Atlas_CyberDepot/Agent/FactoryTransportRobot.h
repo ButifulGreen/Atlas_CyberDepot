@@ -49,7 +49,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item")
 	FName PayloadItemSocketName = TEXT("ItemSocket");
 
-	bool IsMaintenanceDue() const;
+	virtual bool IsMaintenanceDue() const override;
+	virtual float GetOperationRatio() const override;
+	virtual void ApplyRestDecay(int32 Amount) override;
 	bool IsEligibleForQuickCheck() const;
 	void AcceptTransportTask(const FTransportTask& Task);
 	void OnItemPickedUp();

@@ -1,10 +1,13 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Agent/FactoryTransportRobot.h"
+#include "Agent/FactoryAIController.h"
 #include "Infrastructure/LogisticsItem.h"
 #include "Infrastructure/StorageShelf.h"
 #include "Infrastructure/HorizontalTray.h"
+#include "Infrastructure/IdleWaitingZone.h"
 #include "Navigation/CostZoneVolume.h"
+#include "Assignment/OutboundDispatchSubsystem.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -17,6 +20,16 @@ AFactoryTransportRobot::AFactoryTransportRobot()
 bool AFactoryTransportRobot::IsMaintenanceDue() const
 {
 	return OperationCount >= MaintenanceThreshold;
+}
+
+float AFactoryTransportRobot::GetOperationRatio() const
+{
+	return MaintenanceThreshold > 0 ? static_cast<float>(OperationCount) / MaintenanceThreshold : 0.f;
+}
+
+void AFactoryTransportRobot::ApplyRestDecay(int32 Amount)
+{
+	OperationCount = FMath::Max(0, OperationCount - Amount);
 }
 
 bool AFactoryTransportRobot::IsEligibleForQuickCheck() const
@@ -128,12 +141,35 @@ void AFactoryTransportRobot::EvaluateRotationOrContinue()
 		return;
 	}
 
-	if (IsMaintenanceDue() && !PayloadItem)
+	if (!IsMaintenanceDue() || PayloadItem)
 	{
-		// 대기실에 초기화된 로봇이 있으면 대기실로 이동한다.
-		// 교대 가능 여부 판단은 UOutboundDispatchSubsystem(6단계)이 없어 지금은 항상 불가로 간주하고
-		// TryAssignIdleTransportRobot 경유 다음 트립 수령도 6단계에서 연결한다.
+		return;
 	}
+
+	TArray<AActor*> FoundZones;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AIdleWaitingZone::StaticClass(), FoundZones);
+
+	for (AActor* ZoneActor : FoundZones)
+	{
+		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(ZoneActor);
+		if (!Zone || Zone->AllowedAgentType != EActorType::TransportRobot || !Zone->FindRestedOccupant())
+		{
+			continue;
+		}
+
+		FTransform SlotTransform;
+		if (Zone->TryReserveSlot(this, SlotTransform))
+		{
+			if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+			{
+				AIController->RequestMoveWithFilter(SlotTransform.GetLocation());
+			}
+			SetState(EAgentState::Moving);
+			return;
+		}
+	}
+
+	// 교대할 자리를 못 찾으면 TryAssignIdleTransportRobot 경유로 다음 트립을 계속 수령한다(호출 측 책임).
 }
 
 void AFactoryTransportRobot::OnEnterBlockedState()
@@ -190,8 +226,12 @@ void AFactoryTransportRobot::OnTaskCompleted()
 
 	++OperationCount;
 
-	// UOutboundDispatchSubsystem::OnTransportTaskCompleted 호출과 그에 따른
-	// FTaskLifecycleEvent(Completed) 발행은 6단계에서 연결한다.
+	const FGuid CompletedTaskID = CurrentTask.TaskID;
+	if (UOutboundDispatchSubsystem* Dispatch = GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>())
+	{
+		Dispatch->OnTransportTaskCompleted(CompletedTaskID, this);
+	}
+
 	CurrentTask = FTransportTask();
 
 	if (OperationCount < MaintenanceThreshold)
