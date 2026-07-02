@@ -4,7 +4,10 @@
 #include "Infrastructure/LogisticsItem.h"
 #include "Infrastructure/StorageShelf.h"
 #include "Infrastructure/HorizontalTray.h"
+#include "Infrastructure/IdleWaitingZone.h"
+#include "Assignment/OutboundDispatchSubsystem.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 
 AFactoryAtlasRobot::AFactoryAtlasRobot()
@@ -15,6 +18,16 @@ AFactoryAtlasRobot::AFactoryAtlasRobot()
 bool AFactoryAtlasRobot::IsMaintenanceDue() const
 {
 	return OperationCount >= MaintenanceThreshold;
+}
+
+float AFactoryAtlasRobot::GetOperationRatio() const
+{
+	return MaintenanceThreshold > 0 ? static_cast<float>(OperationCount) / MaintenanceThreshold : 0.f;
+}
+
+void AFactoryAtlasRobot::ApplyRestDecay(int32 Amount)
+{
+	OperationCount = FMath::Max(0, OperationCount - Amount);
 }
 
 bool AFactoryAtlasRobot::IsEligibleForQuickCheck() const
@@ -84,12 +97,36 @@ void AFactoryAtlasRobot::EvaluateRotationOrContinue()
 		return;
 	}
 
-	if (IsMaintenanceDue())
+	if (!IsMaintenanceDue())
 	{
-		// 대기실에 초기화된 로봇이 있으면 UOutboundDispatchSubsystem::HandoffStationAssignment로 교대한다.
-		// UOutboundDispatchSubsystem(Docs/07_TaskAssignment.md, 6단계)이 아직 없어 이 분기는 6단계에서 연결하고,
-		// 지금은 교대 불가로 간주해 계속 진행한다.
+		return;
 	}
+
+	TArray<AActor*> FoundZones;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AIdleWaitingZone::StaticClass(), FoundZones);
+
+	for (AActor* ZoneActor : FoundZones)
+	{
+		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(ZoneActor);
+		if (!Zone || Zone->AllowedAgentType != EActorType::AtlasRobot)
+		{
+			continue;
+		}
+
+		AFactoryAtlasRobot* RestedAtlas = Cast<AFactoryAtlasRobot>(Zone->FindRestedOccupant());
+		if (!RestedAtlas)
+		{
+			continue;
+		}
+
+		if (UOutboundDispatchSubsystem* Dispatch = GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>())
+		{
+			Dispatch->HandoffStationAssignment(CurrentAssignment.AssignmentID, this, RestedAtlas);
+		}
+		return;
+	}
+
+	// 교대 가능한 로봇을 못 찾으면 기존 배정을 유지한 채 계속 진행한다.
 }
 
 void AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
@@ -171,11 +208,16 @@ void AFactoryAtlasRobot::OnAssignmentExhausted()
 		Tray->ReleaseWorkZone();
 	}
 
+	const FGuid CompletedAssignmentID = CurrentAssignment.AssignmentID;
+
 	SetState(EAgentState::Idle);
 	OnTaskCompleted();
 
-	// UOutboundDispatchSubsystem::OnStationAssignmentCompleted 호출과 그에 따른
-	// FTaskLifecycleEvent(Completed) 발행은 6단계에서 연결한다.
+	if (UOutboundDispatchSubsystem* Dispatch = GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>())
+	{
+		Dispatch->OnStationAssignmentCompleted(CompletedAssignmentID);
+	}
+
 	CurrentAssignment = FStationAssignment();
 }
 
