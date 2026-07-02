@@ -34,6 +34,11 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 	float BlockedTimer = 0.f;
 
+	// Docs/04_Agent_AI.md IsEligibleForQuickCheck()이 참조하지만 어디에도 멤버로 정의돼 있지 않아
+	// 5단계에서 추가 — AIdleWaitingZone::TryReserveSlot/ReleaseSlot이 갱신한다.
+	UPROPERTY(BlueprintReadOnly)
+	bool bIsParkedInIdleZone = false;
+
 	virtual void SetState(EAgentState NewState);
 	virtual void OnBlockedTick(float DeltaTime);
 	virtual void OnUnblocked();

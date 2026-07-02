@@ -35,6 +35,7 @@ bool AIdleWaitingZone::TryReserveSlot(AFactoryAgentBase* Agent, FTransform& OutS
 		{
 			SlotOccupancy.Add(SlotIndex, Agent);
 			OutSlotTransform = ParkingSlots[SlotIndex];
+			Agent->bIsParkedInIdleZone = true;
 			return true;
 		}
 	}
@@ -58,6 +59,7 @@ void AIdleWaitingZone::ReleaseSlot(AFactoryAgentBase* Agent)
 		}
 	}
 
+	Agent->bIsParkedInIdleZone = false;
 	OnBatchTargetLeft(Agent);
 }
 
