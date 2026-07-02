@@ -9,6 +9,7 @@
 
 ### `FStationAssignment` (USTRUCT)
 - `FGuid AssignmentID`
+- `FGuid SourceOrderID` (8단계 — 어느 `FDeliveryOrder`에서 파생됐는지 추적, 주문 취소 시 역추적용으로 추가)
 - `EWorkZoneType ZoneType`
 - `TWeakObjectPtr<AActor> TargetZoneOwner` (`AStorageShelf` 또는 `AHorizontalTray`)
 - `int32 RemainingCount`
@@ -16,6 +17,7 @@
 
 ### `FTransportTask` (USTRUCT)
 - `FGuid TaskID`
+- `FGuid SourceOrderID` (8단계 — 같은 목적으로 추가. `DecomposeOrder`가 아직 `PendingTransportTasks`를 채우지 않아 실제 값이 채워지지 않는 상태이며, `Docs/14_OpenIssues.md`에 미결로 남겨둔다)
 - `TWeakObjectPtr<AActor> PickupPoint` (선반 또는 트레이)
 - `TWeakObjectPtr<AActor> DropoffPoint`
 - `EItemType ItemType`
@@ -35,7 +37,8 @@
   - `TArray<FTransportTask> PendingTransportTasks`
   - `TMap<FGuid, FPendingHandoff> PendingHandoffs`
 - 함수
-  - `void DecomposeOrder(const FDeliveryOrder& Order)` (선반별 필요 수량만큼 `FStationAssignment` 생성, 입고/출고 구역 동시 운용 가능)
+  - `void DecomposeOrder(const FDeliveryOrder& Order)` (선반별 필요 수량만큼 `FStationAssignment` 생성, 입고/출고 구역 동시 운용 가능. 생성되는 각 `FStationAssignment.SourceOrderID`는 `Order.OrderID`로 채워진다)
+  - `bool TryCancelAssignmentsForOrder(const FGuid& OrderID)` (8단계 — `SourceOrderID`가 일치하는 항목 중 하나라도 `AssignedAtlas`가 배정돼 있으면 전체 취소 거부. 전부 미배정이면 제거하고 성공 반환. `UDeliveryOrderSubsystem::TryCancelOrder`가 호출)
   - `bool TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, FStationAssignment& OutAssignment)`
   - `bool TryAssignIdleTransportRobot(AFactoryTransportRobot* Robot, FTransportTask& OutTask)` (현재 픽업 대기 물품이 있는 거점 중 선택)
   - `void HandoffStationAssignment(const FGuid& AssignmentID, AFactoryAtlasRobot* From, AFactoryAtlasRobot* To)` (**소프트 핸드오프.** 즉시 점유를 넘기지 않고 `PendingHandoffs`에 등록한 뒤 To를 `AStorageShelf`의 스테이징 트랜스폼(`InboundStagingTransform`/`OutboundStagingTransform`)으로 이동시킨다. 실제 점유 이전은 `OnHandoffAtlasArrivedAtStagingPoint`에서 처리하며, 그 전까지 From은 계속 거점을 점유한 채 작업을 이어간다)

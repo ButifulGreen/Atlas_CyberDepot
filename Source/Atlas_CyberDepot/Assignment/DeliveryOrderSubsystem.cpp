@@ -41,6 +41,28 @@ bool UDeliveryOrderSubsystem::TryAcceptOrder(const FGuid& OrderID)
 	return true;
 }
 
+bool UDeliveryOrderSubsystem::TryCancelOrder(const FGuid& OrderID)
+{
+	FDeliveryOrder* Order = ActiveOrders.FindByPredicate([&OrderID](const FDeliveryOrder& O)
+	{
+		return O.OrderID == OrderID;
+	});
+
+	if (!Order || Order->Status != EOrderStatus::Accepted)
+	{
+		return false;
+	}
+
+	UOutboundDispatchSubsystem* Dispatch = GetWorld() ? GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>() : nullptr;
+	if (!Dispatch || !Dispatch->TryCancelAssignmentsForOrder(OrderID))
+	{
+		return false;
+	}
+
+	Order->Status = EOrderStatus::Cancelled;
+	return true;
+}
+
 void UDeliveryOrderSubsystem::OnOrderExpired(const FGuid& OrderID)
 {
 	OnDeliveryResult.Broadcast(OrderID, false);

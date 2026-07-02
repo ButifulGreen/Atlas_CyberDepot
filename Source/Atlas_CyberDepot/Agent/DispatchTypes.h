@@ -19,6 +19,10 @@ struct FStationAssignment
 	UPROPERTY(BlueprintReadOnly)
 	FGuid AssignmentID;
 
+	// 8단계 — 취소(Docs/02_Multiplayer_RPC.md) 시 원본 주문을 역추적하기 위해 추가
+	UPROPERTY(BlueprintReadOnly)
+	FGuid SourceOrderID;
+
 	UPROPERTY(BlueprintReadOnly)
 	EWorkZoneType ZoneType = EWorkZoneType::ShelfInboundZone;
 
@@ -43,6 +47,10 @@ struct FTransportTask
 
 	UPROPERTY(BlueprintReadOnly)
 	FGuid TaskID;
+
+	// 8단계 — 취소(Docs/02_Multiplayer_RPC.md) 시 원본 주문을 역추적하기 위해 추가
+	UPROPERTY(BlueprintReadOnly)
+	FGuid SourceOrderID;
 
 	UPROPERTY(BlueprintReadOnly)
 	TWeakObjectPtr<AActor> PickupPoint;
