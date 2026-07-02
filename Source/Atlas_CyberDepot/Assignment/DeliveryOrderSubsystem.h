@@ -14,7 +14,9 @@ enum class EOrderStatus : uint8
 	Available,
 	Accepted,
 	Completed,
-	Expired
+	Expired,
+	// 8단계 — 예약됐지만 아직 로봇이 배정되지 않은 주문의 취소 결과(Docs/02_Multiplayer_RPC.md)
+	Cancelled
 };
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnDeliveryResult, const FGuid&, bool);
@@ -54,5 +56,7 @@ public:
 
 	void RefreshOrderList();
 	bool TryAcceptOrder(const FGuid& OrderID);
+	// 8단계 — Accepted 상태이면서 아직 로봇 배정 전인 주문만 취소 가능
+	bool TryCancelOrder(const FGuid& OrderID);
 	void OnOrderExpired(const FGuid& OrderID);
 };

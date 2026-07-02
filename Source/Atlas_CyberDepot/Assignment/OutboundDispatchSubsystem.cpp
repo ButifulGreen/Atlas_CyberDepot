@@ -45,12 +45,46 @@ void UOutboundDispatchSubsystem::DecomposeOrder(const FDeliveryOrder& Order)
 
 		FStationAssignment Assignment;
 		Assignment.AssignmentID = FGuid::NewGuid();
+		Assignment.SourceOrderID = Order.OrderID;
 		Assignment.ZoneType = EWorkZoneType::ShelfOutboundZone;
 		Assignment.TargetZoneOwner = Shelf;
 		Assignment.RemainingCount = Pair.Value;
 
 		ActiveStationAssignments.Add(Assignment);
 	}
+
+	// PendingTransportTasks는 아직 DecomposeOrder가 채우지 않아(Docs/14_OpenIssues.md 참고) SourceOrderID 연결 대상이 없다.
+}
+
+bool UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder(const FGuid& OrderID)
+{
+	bool bHasMatch = false;
+	for (const FStationAssignment& Assignment : ActiveStationAssignments)
+	{
+		if (Assignment.SourceOrderID != OrderID)
+		{
+			continue;
+		}
+
+		bHasMatch = true;
+		if (Assignment.AssignedAtlas.IsValid())
+		{
+			return false;
+		}
+	}
+
+	if (!bHasMatch)
+	{
+		// 해당 주문에서 파생된 작업이 없다(예: 대상 선반 없음으로 전부 스킵됨) — 취소할 것도 없으므로 성공 처리.
+		return true;
+	}
+
+	ActiveStationAssignments.RemoveAll([&OrderID](const FStationAssignment& A)
+	{
+		return A.SourceOrderID == OrderID;
+	});
+
+	return true;
 }
 
 bool UOutboundDispatchSubsystem::TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, FStationAssignment& OutAssignment)

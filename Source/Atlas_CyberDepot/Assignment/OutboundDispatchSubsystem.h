@@ -47,6 +47,8 @@ public:
 	TMap<FGuid, FPendingHandoff> PendingHandoffs;
 
 	void DecomposeOrder(const FDeliveryOrder& Order);
+	// 8단계 — 해당 주문에서 파생된 작업이 전부 미배정 상태일 때만 제거하고 true 반환, 하나라도 배정됐으면 false
+	bool TryCancelAssignmentsForOrder(const FGuid& OrderID);
 	bool TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, FStationAssignment& OutAssignment);
 	bool TryAssignIdleTransportRobot(AFactoryTransportRobot* Robot, FTransportTask& OutTask);
 	void HandoffStationAssignment(const FGuid& AssignmentID, AFactoryAtlasRobot* From, AFactoryAtlasRobot* To);
