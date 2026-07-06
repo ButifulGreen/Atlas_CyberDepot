@@ -1,10 +1,12 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Assignment/InventoryOrderSubsystem.h"
+#include "Assignment/OutboundDispatchSubsystem.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
 #include "Infrastructure/HorizontalTray.h"
 #include "Infrastructure/LogisticsItem.h"
 #include "Infrastructure/LogisticsItemSpawner.h"
+#include "Infrastructure/StorageShelf.h"
 #include "Kismet/GameplayStatics.h"
 
 bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
@@ -50,6 +52,27 @@ bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
 		if (Item)
 		{
 			InboundTray->OnItemSpawnedAtStart(Item);
+
+			// 6단계 신규 — 트레이에 올린 물품을 선반까지 옮길 아틀라스/배송로봇 작업을 생성한다.
+			AStorageShelf* TargetShelf = nullptr;
+			TArray<AActor*> FoundShelves;
+			UGameplayStatics::GetAllActorsOfClass(World, AStorageShelf::StaticClass(), FoundShelves);
+			for (AActor* ShelfActor : FoundShelves)
+			{
+				if (AStorageShelf* Shelf = Cast<AStorageShelf>(ShelfActor); Shelf && Shelf->BoundItemType == ItemType)
+				{
+					TargetShelf = Shelf;
+					break;
+				}
+			}
+
+			if (TargetShelf)
+			{
+				if (UOutboundDispatchSubsystem* Dispatch = World->GetSubsystem<UOutboundDispatchSubsystem>())
+				{
+					Dispatch->EnqueueInboundWork(ItemType, InboundTray, TargetShelf);
+				}
+			}
 			break;
 		}
 	}

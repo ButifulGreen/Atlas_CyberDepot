@@ -28,6 +28,25 @@ AStorageShelf* UOutboundDispatchSubsystem::FindShelfForItemType(EItemType ItemTy
 	return nullptr;
 }
 
+AHorizontalTray* UOutboundDispatchSubsystem::FindTrayForItemType(EItemType ItemType, ETrayDirection Direction) const
+{
+	TArray<AActor*> FoundTrays;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AHorizontalTray::StaticClass(), FoundTrays);
+
+	for (AActor* Actor : FoundTrays)
+	{
+		if (AHorizontalTray* Tray = Cast<AHorizontalTray>(Actor))
+		{
+			if (Tray->Direction == Direction && Tray->BoundItemType == ItemType)
+			{
+				return Tray;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
 void UOutboundDispatchSubsystem::DecomposeOrder(const FDeliveryOrder& Order)
 {
 	for (const TPair<EItemType, int32>& Pair : Order.RequestedQuantities)
@@ -49,11 +68,102 @@ void UOutboundDispatchSubsystem::DecomposeOrder(const FDeliveryOrder& Order)
 		Assignment.ZoneType = EWorkZoneType::ShelfOutboundZone;
 		Assignment.TargetZoneOwner = Shelf;
 		Assignment.RemainingCount = Pair.Value;
-
 		ActiveStationAssignments.Add(Assignment);
+
+		// 6단계 신규 — 아틀라스가 선반에서 인출한 물품을 배송로봇에게 넘기면, 그 배송로봇이 향할
+		// Outbound 트레이 쪽에도 별도의 TrayWorkZone 배정(같은 아틀라스가 담당)이 있어야 최종 적재가 된다.
+		AHorizontalTray* Tray = FindTrayForItemType(Pair.Key, ETrayDirection::Outbound);
+		if (!Tray)
+		{
+			continue;
+		}
+
+		FStationAssignment TrayAssignment;
+		TrayAssignment.AssignmentID = FGuid::NewGuid();
+		TrayAssignment.SourceOrderID = Order.OrderID;
+		TrayAssignment.ZoneType = EWorkZoneType::TrayWorkZone;
+		TrayAssignment.TargetZoneOwner = Tray;
+		TrayAssignment.RemainingCount = Pair.Value;
+		ActiveStationAssignments.Add(TrayAssignment);
+
+		// 배송로봇은 짐을 1개씩만 나르므로, 수량만큼 개별 트립을 큐에 넣는다.
+		for (int32 TripIndex = 0; TripIndex < Pair.Value; ++TripIndex)
+		{
+			FTransportTask Task;
+			Task.TaskID = FGuid::NewGuid();
+			Task.SourceOrderID = Order.OrderID;
+			Task.PickupPoint = Shelf;
+			Task.DropoffPoint = Tray;
+			Task.ItemType = Pair.Key;
+			PendingTransportTasks.Add(Task);
+		}
 	}
 
-	// PendingTransportTasks는 아직 DecomposeOrder가 채우지 않아(Docs/14_OpenIssues.md 참고) SourceOrderID 연결 대상이 없다.
+	TryDispatchIdleAgents();
+}
+
+void UOutboundDispatchSubsystem::TryDispatchIdleAgents()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TArray<AActor*> FoundAtlases;
+	UGameplayStatics::GetAllActorsOfClass(World, AFactoryAtlasRobot::StaticClass(), FoundAtlases);
+	for (AActor* Actor : FoundAtlases)
+	{
+		AFactoryAtlasRobot* Atlas = Cast<AFactoryAtlasRobot>(Actor);
+		if (Atlas && Atlas->CurrentState == EAgentState::Idle)
+		{
+			FStationAssignment Assignment;
+			TryAssignIdleAtlas(Atlas, Assignment);
+		}
+	}
+
+	TArray<AActor*> FoundRobots;
+	UGameplayStatics::GetAllActorsOfClass(World, AFactoryTransportRobot::StaticClass(), FoundRobots);
+	for (AActor* Actor : FoundRobots)
+	{
+		AFactoryTransportRobot* Robot = Cast<AFactoryTransportRobot>(Actor);
+		if (Robot && Robot->CurrentState == EAgentState::Idle)
+		{
+			FTransportTask Task;
+			TryAssignIdleTransportRobot(Robot, Task);
+		}
+	}
+}
+
+void UOutboundDispatchSubsystem::EnqueueInboundWork(EItemType ItemType, AHorizontalTray* Tray, AStorageShelf* Shelf)
+{
+	if (!Tray || !Shelf)
+	{
+		return;
+	}
+
+	FStationAssignment TrayAssignment;
+	TrayAssignment.AssignmentID = FGuid::NewGuid();
+	TrayAssignment.ZoneType = EWorkZoneType::TrayWorkZone;
+	TrayAssignment.TargetZoneOwner = Tray;
+	TrayAssignment.RemainingCount = 1;
+	ActiveStationAssignments.Add(TrayAssignment);
+
+	FStationAssignment ShelfAssignment;
+	ShelfAssignment.AssignmentID = FGuid::NewGuid();
+	ShelfAssignment.ZoneType = EWorkZoneType::ShelfInboundZone;
+	ShelfAssignment.TargetZoneOwner = Shelf;
+	ShelfAssignment.RemainingCount = 1;
+	ActiveStationAssignments.Add(ShelfAssignment);
+
+	FTransportTask Task;
+	Task.TaskID = FGuid::NewGuid();
+	Task.PickupPoint = Tray;
+	Task.DropoffPoint = Shelf;
+	Task.ItemType = ItemType;
+	PendingTransportTasks.Add(Task);
+
+	TryDispatchIdleAgents();
 }
 
 bool UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder(const FGuid& OrderID)
