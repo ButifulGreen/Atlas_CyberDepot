@@ -46,6 +46,15 @@ public:
 	virtual void OnUnblocked();
 	FStateSnapshot ToSnapshot() const;
 
+	// AFactoryAIController::OnMoveCompleted가 이동 성공 시 호출. 아틀라스/운송로봇이 override해
+	// 도착 후 행동(TransferItem 등)을 트리거한다. 6단계 오케스트레이션 레이어에서 신규 추가.
+	virtual void OnArrivedAtDestination() {}
+
+	// CurrentState==Working인 동안 Tick에서 주기적으로 호출(파트너 대기 재시도 등). 6단계 신규.
+	virtual void OnWorkingTick(float DeltaTime) {}
+
+	virtual void Tick(float DeltaTime) override;
+
 	// AtlasRobot/TransportRobot가 각자 OperationCount/MaintenanceThreshold로 구현(override)한다.
 	// AIdleWaitingZone·AMSmartFactoryManager처럼 구체 타입을 모르는 코드가 공용으로 판정할 수 있도록
 	// 6단계에서 베이스에 추가.

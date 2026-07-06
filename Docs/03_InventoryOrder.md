@@ -5,7 +5,7 @@
 ### `UInventoryOrderSubsystem` (UWorldSubsystem)
 - 멤버: `TMap<EItemType, FStockLineState> StockLines`
 - 함수
-  - `bool TryPlaceOrder(EItemType ItemType, int32 Quantity)` (8단계 — 전용 플레이어 개념이 없어져 `AFactoryPlayerController::Server_SubmitKioskOrder` 경유로 누구나 호출 가능. 5단계 후속 — 재고 잠금 통과 시 `AHorizontalTray::BoundItemType`이 일치하는 Inbound 트레이를 찾아 비어있으면 `ALogisticsItemSpawner::TryAcquireItem`으로 풀에서 물품을 꺼내 `OnItemSpawnedAtStart` 호출. 트레이가 이미 점유 중이면 이번 호출에선 물리적으로 올리지 않고 주문만 유효 처리 — Quantity>1의 나머지 수량을 트레이가 빌 때마다 이어서 흘려보내는 대기열은 아직 없음, 후속 과제)
+  - `bool TryPlaceOrder(EItemType ItemType, int32 Quantity)` (8단계 — 전용 플레이어 개념이 없어져 `AFactoryPlayerController::Server_SubmitKioskOrder` 경유로 누구나 호출 가능. 5단계 후속 — 재고 잠금 통과 시 `AHorizontalTray::BoundItemType`이 일치하는 Inbound 트레이를 찾아 비어있으면 `ALogisticsItemSpawner::TryAcquireItem`으로 풀에서 물품을 꺼내 `OnItemSpawnedAtStart` 호출. 트레이가 이미 점유 중이면 이번 호출에선 물리적으로 올리지 않고 주문만 유효 처리 — Quantity>1의 나머지 수량을 트레이가 빌 때마다 이어서 흘려보내는 대기열은 아직 없음, 후속 과제. 6단계 신규 — 물품을 실제로 올린 직후, 같은 `ItemType`의 선반을 찾아 `UOutboundDispatchSubsystem::EnqueueInboundWork(ItemType, Tray, Shelf)`를 호출해 트레이→선반 이동 작업(아틀라스 배정 2건 + 배송로봇 트립 1건)을 생성한다 — `07_TaskAssignment.md` 참고)
   - `void OnInboundArrived(EItemType ItemType, int32 Quantity)`
   - `bool IsLineLocked(EItemType ItemType) const` (`Code:004` 선반 포화 시 true)
   - `FOnLineLockChanged OnLineLockChanged`

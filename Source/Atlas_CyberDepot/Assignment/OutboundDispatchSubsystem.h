@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Agent/DispatchTypes.h"
+#include "Infrastructure/HorizontalTray.h"
 #include "OutboundDispatchSubsystem.generated.h"
 
 class AFactoryAtlasRobot;
@@ -58,6 +59,15 @@ public:
 	// 문서는 TaskID만 받지만, 이벤트에 실을 ActorID/ActorType을 얻으려면 호출자(로봇)가 필요해 매개변수로 추가
 	void OnTransportTaskCompleted(const FGuid& TaskID, AFactoryTransportRobot* Robot);
 
+	// 6단계 신규 — 월드의 Idle 상태 아틀라스/배송로봇에게 대기 중인 배정/작업을 밀어넣는다(Push).
+	// DecomposeOrder/EnqueueInboundWork가 새 작업을 만든 직후 호출.
+	void TryDispatchIdleAgents();
+
+	// 6단계 신규 — InventoryOrderSubsystem::TryPlaceOrder가 Inbound 트레이에 물품을 올린 직후 호출.
+	// TrayWorkZone(Tray) + ShelfInboundZone(Shelf) 배정과 이를 잇는 FTransportTask를 생성한다.
+	void EnqueueInboundWork(EItemType ItemType, AHorizontalTray* Tray, AStorageShelf* Shelf);
+
 private:
 	AStorageShelf* FindShelfForItemType(EItemType ItemType) const;
+	AHorizontalTray* FindTrayForItemType(EItemType ItemType, ETrayDirection Direction) const;
 };

@@ -149,6 +149,12 @@ void AStorageShelf::ConfirmOutboundRemoved(int32 FloorIndex, int32 SlotIndex)
 	Slot.bReservedForOutbound = false;
 }
 
+ALogisticsItem* AStorageShelf::GetItemAt(int32 FloorIndex, int32 SlotIndex) const
+{
+	const int32 ArrayIndex = ToSlotArrayIndex(FloorIndex, SlotIndex);
+	return Slots.IsValidIndex(ArrayIndex) ? Slots[ArrayIndex].OccupyingItem.Get() : nullptr;
+}
+
 bool AStorageShelf::IsFull() const
 {
 	return GetOccupiedCount() >= Slots.Num();

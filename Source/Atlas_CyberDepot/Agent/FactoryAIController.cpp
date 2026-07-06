@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Agent/FactoryAIController.h"
+#include "Agent/FactoryAgentBase.h"
 #include "AITypes.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
@@ -41,6 +42,16 @@ namespace
 void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
 {
 	Super::OnMoveCompleted(RequestID, Result);
+
+	if (!Result.IsSuccess())
+	{
+		return;
+	}
+
+	if (AFactoryAgentBase* Agent = Cast<AFactoryAgentBase>(GetPawn()))
+	{
+		Agent->OnArrivedAtDestination();
+	}
 }
 
 void AFactoryAIController::RequestMoveWithFilter(const FVector& Destination)

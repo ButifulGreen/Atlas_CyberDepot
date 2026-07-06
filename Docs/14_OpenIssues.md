@@ -4,7 +4,9 @@
 
 - `ACostZoneVolume`을 NavQueryFilter 런타임 코스트 조정 방식으로 전환했지만, 그럼에도 구현 후 `stat navigation`으로 실측은 필요하다(코스트 조정 자체도 쿼리마다 계산 비용이 있으므로).
 - ~~키오스크 전용 플레이어가 "주문 승인" 외에 NPC 디스패치 판단 같은 추가 권한을 가질지는 `02_Multiplayer_RPC.md` 확정 시 함께 정한다.~~ → 8단계에서 해소: 키오스크는 전용 플레이어가 아닌 인게임 장비로 재설계되어 전원 동일 권한(`02_Multiplayer_RPC.md`).
-- (8단계 신규) `FTransportTask::SourceOrderID`는 필드만 추가됐고 실제로 채워지지 않는다 — `UOutboundDispatchSubsystem::DecomposeOrder`가 아직 `PendingTransportTasks`를 채우는 로직이 없기 때문(`07_TaskAssignment.md`). 배정/디스패치 로직이 정교화되는 이후 단계에서 함께 채우고, 그때 운송 작업 취소 지원 여부도 재검토한다.
+- ~~(8단계 신규) `FTransportTask::SourceOrderID`는 필드만 추가됐고 실제로 채워지지 않는다 — `UOutboundDispatchSubsystem::DecomposeOrder`가 아직 `PendingTransportTasks`를 채우는 로직이 없기 때문(`07_TaskAssignment.md`).~~ → 6단계 오케스트레이션 작업에서 해소: `DecomposeOrder`/`EnqueueInboundWork`가 실제로 채운다. 단, 운송 작업 취소(`TryCancelAssignmentsForOrder`가 `PendingTransportTasks`는 건드리지 않음)는 아직 미지원 — 재검토 필요.
+- (6단계 신규) `UOutboundDispatchSubsystem::HandoffStationAssignment`는 `ShelfOutboundZone` 교대 시 To를 `OutboundStagingTransform`으로 보내는데, Outbound 배정의 첫 다리는 원래 슬롯에서 시작해야 해서 완전히 정합하지 않는다(`07_TaskAssignment.md` 참고). 대기실(`AIdleWaitingZone`)이 아직 레벨에 배치되지 않아 실사용 안 돼 당장 영향 없음 — 대기실/교대를 실제로 테스트하는 단계에서 재검토.
+- (6단계 신규) 아틀라스의 파트너(배송로봇) 대기 재시도(`OnWorkingTick` + `ZoneRetryIntervalSeconds`)와 배송로봇 탐색 반경(`RendezvousSearchRadius`)은 레벨 제작 후 실제 통로 길이/로봇 속도에 맞춰 튜닝이 필요한 가안이다.
 - (8단계 신규) `AFactorySpectatorPawn`의 `FactoryBoundary` 콜리전 채널은 코드/설정으로 정의만 해뒀고, 실제 경계 볼륨 배치는 레벨이 만들어지는 시점(에디터 작업)으로 미뤄져 있다.
 - (8단계 신규) `AFactoryNPCHuman::ReleasePossession()`은 `SpawnDefaultController()`로 AI 제어 복귀를 시도하는데, 이는 각 로봇/NPC 액터의 `AutoPossessAI`/`AIControllerClass` 설정이 레벨/블루프린트에서 되어 있어야 실제로 동작한다 — 현재 코드베이스에는 이 설정이 어디에도 없어 실기 확인이 필요하다.
 - (8단계 신규) Enhanced Input 에셋(`IA_Interact`, 매핑 컨텍스트)은 코드로 생성할 수 없어 에디터에서 별도 제작 필요.

@@ -6,6 +6,41 @@
 AFactoryAgentBase::AFactoryAgentBase()
 {
 	bReplicates = true;
+	PrimaryActorTick.bCanEverTick = true;
+}
+
+void AFactoryAgentBase::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (HasAuthority() && CurrentState == EAgentState::Working)
+	{
+		OnWorkingTick(DeltaTime);
+	}
+
+	// Blocked 판정과 그에 따른 ACostZoneVolume 등록/해제는 서버 권한 로직이라 서버에서만 수행한다.
+	if (!HasAuthority() || CurrentState != EAgentState::Moving)
+	{
+		BlockedTimer = 0.f;
+		return;
+	}
+
+	const bool bIsStationary = GetVelocity().SizeSquared() < KINDA_SMALL_NUMBER;
+	if (!bIsStationary)
+	{
+		if (BlockedTimer >= BlockedThresholdSeconds)
+		{
+			OnUnblocked();
+		}
+		BlockedTimer = 0.f;
+		return;
+	}
+
+	BlockedTimer += DeltaTime;
+	if (BlockedTimer >= BlockedThresholdSeconds)
+	{
+		OnBlockedTick(DeltaTime);
+	}
 }
 
 void AFactoryAgentBase::BeginPlay()

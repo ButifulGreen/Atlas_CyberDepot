@@ -9,6 +9,7 @@
 
 class ALogisticsItem;
 class URepairProgressComponent;
+class ACostZoneVolume;
 
 // Docs/04_Agent_AI.md §4 — 5단계 대상.
 // UOutboundDispatchSubsystem 호출부(07_TaskAssignment.md, 6단계)는 아직 없어 해당 지점만 주석 처리.
@@ -23,7 +24,8 @@ public:
 	static constexpr float MaxBreakdownChanceCap = 0.40f;
 
 	// 정지 상태가 이 반경 안의 ACostZoneVolume에 혼잡도로 반영되는 거리 (Docs에 없는 구현값)
-	static constexpr float BlockedZoneRegisterRadius = 300.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Congestion")
+	float BlockedZoneRegisterRadius = 300.f;
 
 	UPROPERTY(BlueprintReadOnly)
 	FTransportTask CurrentTask;
@@ -53,15 +55,33 @@ public:
 	virtual float GetOperationRatio() const override;
 	virtual void ApplyRestDecay(int32 Amount) override;
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
+	virtual void OnBlockedTick(float DeltaTime) override;
+	virtual void OnUnblocked() override;
+	virtual void OnArrivedAtDestination() override;
 	bool IsEligibleForQuickCheck() const;
 	void AcceptTransportTask(const FTransportTask& Task);
-	void OnItemPickedUp();
 	void EvaluateRotationOrContinue();
 	void OnEnterBlockedState();
 	void OnTaskCompleted();
+
+	// 6단계 신규 — 배송로봇은 트레이/선반을 직접 건드리지 않고, 아틀라스가 소켓으로 직접 주고받는다.
+	// 아틀라스가 TransferItem(Destination=this)로 물품을 건널 때 호출 — 부착 후 DropoffPoint로 이동 재개.
+	void OnItemGivenByAtlas(ALogisticsItem* Item);
+	// 아틀라스가 TransferItem(Source=this)로 물품을 가져갈 때 호출 — 비우고 트립 완료 처리.
+	void OnItemCollectedByAtlas();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
 	float ComputeCurrentBreakdownChance() const;
+
+	// PickupPoint/DropoffPoint가 Tray면 GetTransportRobotWorkLocation(), Shelf면 방향에 맞는
+	// 스테이징 트랜스폼 위치를 반환한다(선반은 슬롯 개념이 없는 로봇 대기 지점 1곳뿐).
+	FVector GetTaskPointLocation(AActor* PointActor, bool bIsPickupSide) const;
+
+	// OnBlockedTick 진입 엣지(1회)에서만 OnEnterBlockedState()를 호출하기 위한 플래그.
+	bool bHasRegisteredBlocker = false;
+
+	// OnEnterBlockedState에서 등록한 존들을 기억해뒀다가 OnUnblocked에서 그대로 해제한다.
+	TArray<TWeakObjectPtr<ACostZoneVolume>> RegisteredBlockedZones;
 };

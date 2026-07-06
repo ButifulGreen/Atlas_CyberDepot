@@ -27,10 +27,11 @@ public:
 	// Crowd Avoidance에서 TargetActor를 상호 무시(bIgnore=true) 또는 재고려 대상으로 토글
 	void SetAvoidanceIgnoreActor(AActor* TargetActor, bool bIgnore);
 
+	// ApplyDynamicCongestionCost가 주변 ACostZoneVolume을 찾을 때 사용하는 감지 반경 (Docs에 없는 구현값)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Congestion")
+	float CongestionSenseRadius = 1500.f;
+
 private:
 	// Crowd 회피 그룹 비트 중 정비 접근 시 상호 무시 용도로 예약한 비트
 	static constexpr int32 MaintenanceIgnoreAvoidanceGroup = 1 << 7;
-
-	// ApplyDynamicCongestionCost가 주변 ACostZoneVolume을 찾을 때 사용하는 감지 반경 (Docs에 없는 구현값)
-	static constexpr float CongestionSenseRadius = 1500.f;
 };
