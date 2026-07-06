@@ -2,6 +2,10 @@
 
 #include "Assignment/InventoryOrderSubsystem.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
+#include "Infrastructure/HorizontalTray.h"
+#include "Infrastructure/LogisticsItem.h"
+#include "Infrastructure/LogisticsItemSpawner.h"
+#include "Kismet/GameplayStatics.h"
 
 bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
 {
@@ -11,8 +15,45 @@ bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
 		return false;
 	}
 
-	// 입고 트레이에 실제로 물품을 스폰하는 연결(AHorizontalTray::OnItemSpawnedAtStart)은
-	// 레벨의 인바운드 트레이-품목 매핑이 정해지는 이후 단계에서 채운다.
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return true;
+	}
+
+	// 해당 품목을 담당하는 입고 트레이를 찾는다 — 비어있지 않으면 지금은 못 올리고 다음 기회에 재시도한다
+	// (Quantity가 1보다 큰 경우 나머지 수량을 이어서 흘려보내는 대기열은 아직 없음, 후속 과제).
+	AHorizontalTray* InboundTray = nullptr;
+	TArray<AActor*> FoundTrays;
+	UGameplayStatics::GetAllActorsOfClass(World, AHorizontalTray::StaticClass(), FoundTrays);
+	for (AActor* Actor : FoundTrays)
+	{
+		AHorizontalTray* Tray = Cast<AHorizontalTray>(Actor);
+		if (Tray && Tray->Direction == ETrayDirection::Inbound && Tray->BoundItemType == ItemType)
+		{
+			InboundTray = Tray;
+			break;
+		}
+	}
+
+	if (!InboundTray || InboundTray->CurrentItem.IsValid())
+	{
+		return true;
+	}
+
+	TArray<AActor*> FoundSpawners;
+	UGameplayStatics::GetAllActorsOfClass(World, ALogisticsItemSpawner::StaticClass(), FoundSpawners);
+	for (AActor* Actor : FoundSpawners)
+	{
+		ALogisticsItemSpawner* Spawner = Cast<ALogisticsItemSpawner>(Actor);
+		ALogisticsItem* Item = Spawner ? Spawner->TryAcquireItem(ItemType) : nullptr;
+		if (Item)
+		{
+			InboundTray->OnItemSpawnedAtStart(Item);
+			break;
+		}
+	}
+
 	return true;
 }
 

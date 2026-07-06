@@ -5,13 +5,14 @@
 ### `UInventoryOrderSubsystem` (UWorldSubsystem)
 - 멤버: `TMap<EItemType, FStockLineState> StockLines`
 - 함수
-  - `bool TryPlaceOrder(EItemType ItemType, int32 Quantity)` (8단계 — 전용 플레이어 개념이 없어져 `AFactoryPlayerController::Server_SubmitKioskOrder` 경유로 누구나 호출 가능)
+  - `bool TryPlaceOrder(EItemType ItemType, int32 Quantity)` (8단계 — 전용 플레이어 개념이 없어져 `AFactoryPlayerController::Server_SubmitKioskOrder` 경유로 누구나 호출 가능. 5단계 후속 — 재고 잠금 통과 시 `AHorizontalTray::BoundItemType`이 일치하는 Inbound 트레이를 찾아 비어있으면 `ALogisticsItemSpawner::TryAcquireItem`으로 풀에서 물품을 꺼내 `OnItemSpawnedAtStart` 호출. 트레이가 이미 점유 중이면 이번 호출에선 물리적으로 올리지 않고 주문만 유효 처리 — Quantity>1의 나머지 수량을 트레이가 빌 때마다 이어서 흘려보내는 대기열은 아직 없음, 후속 과제)
   - `void OnInboundArrived(EItemType ItemType, int32 Quantity)`
   - `bool IsLineLocked(EItemType ItemType) const` (`Code:004` 선반 포화 시 true)
   - `FOnLineLockChanged OnLineLockChanged`
 
 ### `FStockLineState` (USTRUCT)
-- `EItemType ItemType`, `int32 CurrentStock`, `int32 MaxCapacity`, `bool bIsLineLocked`, `FName BoundInboundLineID`
+- `EItemType ItemType`, `int32 CurrentStock`, `int32 MaxCapacity`, `bool bIsLineLocked`
+- (5단계 후속 — 트레이 식별용이던 `FName BoundInboundLineID`는 미사용 상태로 죽어있어 제거. 대신 `AHorizontalTray`가 `AStorageShelf::BoundItemType`과 동일한 패턴으로 `EItemType BoundItemType`을 직접 들고 있어, `GetAllActorsOfClass` + 타입 비교로 찾는다)
 
 ### `UDeliveryOrderSubsystem` (UWorldSubsystem)
 - 멤버: `TArray<FDeliveryOrder> ActiveOrders`, `float OrderRefreshIntervalSeconds`

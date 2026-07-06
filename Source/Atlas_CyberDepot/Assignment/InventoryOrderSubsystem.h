@@ -25,9 +25,6 @@ struct FStockLineState
 
 	UPROPERTY(BlueprintReadOnly)
 	bool bIsLineLocked = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly)
-	FName BoundInboundLineID;
 };
 
 // Docs/03_InventoryOrder.md §3 — 6단계 대상.

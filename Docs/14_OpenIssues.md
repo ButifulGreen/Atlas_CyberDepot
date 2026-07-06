@@ -25,6 +25,7 @@
 - (10단계 신규) `UBenchmarkHarnessSubsystem::RecordPerfSample`의 `NavigationTickTimeMs`는 대응하는 공개 전역 카운터가 없어 항상 0 — 실측은 `stat navigation` 수동 확인에 계속 의존한다.
 - (10단계 신규) `RunScalingComparison`/`StartForcedDeadlockDemo`는 레벨/내비메시가 없는 기획단계 특성상 코드 구조만 완성됐고 실기 계측·시연 테스트는 못 했다. 레벨이 만들어지면 `AgentClassToSpawn`/`SpawnOrigin` 등 밸런싱 값을 실제 레벨에 맞게 조정하고 재검증 필요.
 - (10단계 신규) `UReplayPlaybackSubsystem`이 방출하는 `FOnPlaybackFrame` 델리게이트를 실제 화면에 어떻게 시각화(고스트 액터 스폰 등)할지는 미정 — 소비자 측 설계가 필요하다.
+- (5단계 후속 신규) `UInventoryOrderSubsystem::TryPlaceOrder`가 Inbound 트레이에 물품을 올릴 때, 트레이가 이미 점유 중이면 이번 호출에서는 물리적으로 안 올리고 넘어간다 — `Quantity`가 1보다 큰 주문의 나머지 수량을 트레이가 빌 때마다 이어서 자동으로 흘려보내는 대기열이 없다. 배정/디스패치 로직이 정교화될 때 함께 채울 것.
 
 ## 검토 후 미채택 사항 (근거 포함)
 

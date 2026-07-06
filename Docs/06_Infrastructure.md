@@ -41,20 +41,32 @@
 - `bool bReservedForInbound`, `bool bReservedForOutbound` (예약~확정 사이의 임시 락)
 
 ### `AHorizontalTray` (AActor) — 입출고 공통 단일 클래스
-물품을 항상 1개씩만 이동시키는 단순 상태 머신. 작업 구역은 아틀라스 1대 + 운송로봇 1대로 동시 접근이 제한된다. 입고 트레이는 주문 배정 시 시작점에 물품을 보이지 않게 텔레포트로 생성하고, 출고 트레이는 아틀라스가 직접 물품을 올린다. 양쪽 모두 끝에 도달한 물품은 보이지 않게 텔레포트로 제거된다. 고장나지 않으며 정비 대상이 아니다.
+물품을 항상 1개씩만 이동시키는 단순 상태 머신. 작업 구역은 아틀라스 1대 + 운송로봇 1대로 동시 접근이 제한된다. 입고 트레이는 주문 배정 시 `ItemStartMarker`에 물품을 텔레포트로 생성해 `ItemEndMarker`로 흘려보내고(Atlas가 End에서 픽업), 출고 트레이는 아틀라스가 `ItemEndMarker`에 물품을 올려 반대 방향인 `ItemStartMarker`로 흘려보낸다(운송로봇이 Start에서 픽업) — 두 방향이 서로 반대다(5단계 후속 정정, 최초 설계 문구의 "끝에서 텔레포트 제거"는 실제로는 로봇이 손 소켓으로 직접 부착해 옮겨가는 방식으로 대체됨). 고장나지 않으며 정비 대상이 아니다.
 
 - 멤버
   - `ETrayDirection Direction` (Inbound / Outbound)
+  - `EItemType BoundItemType` (5단계 후속 신규 — `AStorageShelf::BoundItemType`과 동일 패턴, 이 트레이가 담당하는 품목)
   - `TWeakObjectPtr<ALogisticsItem> CurrentItem`
   - `bool bIsHaltedAtEnd`
   - `TWeakObjectPtr<AFactoryAgentBase> WorkZoneOccupant` (아틀라스+운송로봇 각 1대 제한 구역 점유자)
+  - `USceneComponent* WorkMarker` (5단계 후속 신규 — 트레이 피벗과 실제 작업 지점이 다를 수 있어 분리한 마커. 선반과 달리 지점이 1개뿐이라 Floor/Slot 태그 없음)
+  - `float AtlasWorkDistance`, `float TransportRobotWorkDistance` (Balance — 마커에서 트레이 정면축 한 방향으로만 뗀 거리, 선반과 달리 좌우 부호 반전 없음)
+  - `USceneComponent* ItemStartMarker`, `USceneComponent* ItemEndMarker` (5단계 후속 신규 — 물품이 처음 텔레포트되는 지점과 컨베이어가 멈추는 지점은 서로 다른 지점이라 분리. 기존 `TrayLength`로 끝점을 역산하던 방식은 제거)
 - 함수
   - `bool TryReserveWorkZone(AFactoryAgentBase* Agent)` / `void ReleaseWorkZone()`
   - `void OnItemSpawnedAtStart(ALogisticsItem* Item)` (Inbound 전용)
-  - `void OnItemPlacedByAtlas(ALogisticsItem* Item)` (Outbound 전용)
+  - `void OnItemPlacedByAtlas(ALogisticsItem* Item)` (Outbound 전용, `ItemEndMarker`로 명시적 스냅)
   - `void TickConveyance(float DeltaTime)`
   - `void OnItemReachedEnd()`
   - `void OnItemCleared()`
+  - `FVector GetAtlasWorkLocation() const` / `FVector GetTransportRobotWorkLocation() const` (5단계 후속 신규)
+
+### `ALogisticsItemSpawner` (AActor) — 5단계 후속 신규
+"입고 트레이는 시작점에 물품을 보이지 않게 텔레포트로 생성한다"는 위 `AHorizontalTray` 설계를 실제로 구현하는 물품 풀. 레벨 시작 시 `EItemType` 3종 전부 `ItemsPerType`(밸런스 값, 기본 30)만큼 미리 스폰해 숨김+콜리전 꺼짐 상태로 대기시키고, 필요할 때 하나씩 꺼내 활성화(텔레포트 대상)한다.
+- 멤버: `TSubclassOf<ALogisticsItem> ItemClass`, `int32 ItemsPerType`(Balance)
+- 함수
+  - `ALogisticsItem* TryAcquireItem(EItemType Type)` (대기 중인 해당 타입 물품 하나를 활성화해 반환, 없으면 nullptr)
+  - `void ReturnItem(ALogisticsItem* Item)` (다시 숨기고 콜리전 끄고 대기 위치로 복귀)
 
 ### `ADockingPoint` (AActor)
 - 멤버: `FGridIndex GridIndex`, `bool bOccupied`, `TWeakObjectPtr<AFactoryAgentBase> OccupyingAgent`

@@ -66,6 +66,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item")
 	FName HeldItemSocketName = TEXT("ItemSocket");
 
+	// ABP의 Two-Bone IK가 읽어가는 손 타겟(월드 좌표)과 게이트. TransferItem이 선반 슬롯을 확정하는 시점에 갱신된다.
+	UPROPERTY(BlueprintReadOnly, Category = "IK")
+	FVector CurrentIKHandTarget = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "IK")
+	bool bIsReachingForItem = false;
+
 	virtual bool IsMaintenanceDue() const override;
 	virtual float GetOperationRatio() const override;
 	virtual void ApplyRestDecay(int32 Amount) override;
