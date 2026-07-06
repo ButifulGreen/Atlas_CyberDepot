@@ -153,9 +153,13 @@ void AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 			PendingSlotReservation.FloorIndex = FloorIndex;
 			PendingSlotReservation.SlotIndex = SlotIndex;
 
+			CurrentIKHandTarget = SourceShelf->GetSlotMarkerTransform(FloorIndex, SlotIndex).GetLocation();
+			bIsReachingForItem = true;
+
 			AttachHeldItem(Item);
 			SourceShelf->ConfirmOutboundRemoved(FloorIndex, SlotIndex);
 
+			bIsReachingForItem = false;
 			PendingSlotReservation = FPendingSlotReservation();
 		}
 		return;
@@ -171,10 +175,14 @@ void AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 			PendingSlotReservation.FloorIndex = FloorIndex;
 			PendingSlotReservation.SlotIndex = SlotIndex;
 
+			CurrentIKHandTarget = DestShelf->GetSlotMarkerTransform(FloorIndex, SlotIndex).GetLocation();
+			bIsReachingForItem = true;
+
 			ALogisticsItem* Item = HeldItem;
 			DestShelf->ConfirmInbound(FloorIndex, SlotIndex, Item);
 			DetachHeldItem();
 
+			bIsReachingForItem = false;
 			PendingSlotReservation = FPendingSlotReservation();
 		}
 		return;
