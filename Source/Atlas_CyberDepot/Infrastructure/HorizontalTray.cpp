@@ -9,11 +9,38 @@ AHorizontalTray::AHorizontalTray()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
+
+	USceneComponent* TrayRoot = CreateDefaultSubobject<USceneComponent>(TEXT("TrayRoot"));
+	RootComponent = TrayRoot;
+
+	WorkMarker = CreateDefaultSubobject<USceneComponent>(TEXT("WorkMarker"));
+	WorkMarker->SetupAttachment(TrayRoot);
+
+	ItemStartMarker = CreateDefaultSubobject<USceneComponent>(TEXT("ItemStartMarker"));
+	ItemStartMarker->SetupAttachment(TrayRoot);
+
+	ItemEndMarker = CreateDefaultSubobject<USceneComponent>(TEXT("ItemEndMarker"));
+	ItemEndMarker->SetupAttachment(TrayRoot);
 }
 
 void AHorizontalTray::BeginPlay()
 {
 	Super::BeginPlay();
+}
+
+FVector AHorizontalTray::ComputeWorkLocation(float DepthOffset) const
+{
+	return WorkMarker->GetComponentLocation() + GetActorForwardVector() * DepthOffset;
+}
+
+FVector AHorizontalTray::GetAtlasWorkLocation() const
+{
+	return ComputeWorkLocation(AtlasWorkDistance);
+}
+
+FVector AHorizontalTray::GetTransportRobotWorkLocation() const
+{
+	return ComputeWorkLocation(TransportRobotWorkDistance);
 }
 
 void AHorizontalTray::Tick(float DeltaTime)
@@ -45,7 +72,7 @@ void AHorizontalTray::OnItemSpawnedAtStart(ALogisticsItem* Item)
 		return;
 	}
 
-	Item->SetActorLocation(GetActorLocation());
+	Item->SetActorLocation(ItemStartMarker->GetComponentLocation());
 	CurrentItem = Item;
 	bIsHaltedAtEnd = false;
 }
@@ -57,6 +84,8 @@ void AHorizontalTray::OnItemPlacedByAtlas(ALogisticsItem* Item)
 		return;
 	}
 
+	// Outbound 전용 — 로봇 손에서 분리된 자리 그대로 두지 않고 컨베이어 종점(End)에 명시적으로 스냅한다.
+	Item->SetActorLocation(ItemEndMarker->GetComponentLocation());
 	CurrentItem = Item;
 	bIsHaltedAtEnd = false;
 }
@@ -69,11 +98,16 @@ void AHorizontalTray::TickConveyance(float DeltaTime)
 	}
 
 	ALogisticsItem* Item = CurrentItem.Get();
-	const FVector EndLocation = GetActorLocation() + GetActorForwardVector() * TrayLength;
-	const FVector NewLocation = FMath::VInterpConstantTo(Item->GetActorLocation(), EndLocation, DeltaTime, ConveySpeedUnitsPerSecond);
+
+	// Inbound는 Start에서 생성돼 End로, Outbound는 End에서 놓여 Start로 — 서로 반대 방향으로 흘러간다.
+	const FVector TargetLocation = (Direction == ETrayDirection::Inbound)
+		? ItemEndMarker->GetComponentLocation()
+		: ItemStartMarker->GetComponentLocation();
+
+	const FVector NewLocation = FMath::VInterpConstantTo(Item->GetActorLocation(), TargetLocation, DeltaTime, ConveySpeedUnitsPerSecond);
 	Item->SetActorLocation(NewLocation);
 
-	if (FVector::DistSquared(NewLocation, EndLocation) <= KINDA_SMALL_NUMBER)
+	if (FVector::DistSquared(NewLocation, TargetLocation) <= KINDA_SMALL_NUMBER)
 	{
 		OnItemReachedEnd();
 	}
