@@ -16,6 +16,38 @@ AStorageShelf::AStorageShelf()
 void AStorageShelf::BeginPlay()
 {
 	Super::BeginPlay();
+
+	GetComponents<UStorageSlotMarkerComponent>(SlotMarkers);
+}
+
+FTransform AStorageShelf::GetSlotMarkerTransform(int32 FloorIndex, int32 SlotIndex) const
+{
+	for (const UStorageSlotMarkerComponent* Marker : SlotMarkers)
+	{
+		if (Marker && Marker->FloorIndex == FloorIndex && Marker->SlotIndex == SlotIndex)
+		{
+			return Marker->GetComponentTransform();
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("AStorageShelf::GetSlotMarkerTransform: Floor %d Slot %d 마커를 찾지 못해 선반 자신의 트랜스폼으로 대체합니다 (%s)"), FloorIndex, SlotIndex, *GetName());
+	return GetActorTransform();
+}
+
+FVector AStorageShelf::ComputeWorkLocation(const FVector& MarkerLocation, EWorkZoneType ZoneType, float DepthOffset) const
+{
+	const float Sign = (ZoneType == EWorkZoneType::ShelfInboundZone) ? 1.f : -1.f;
+	return MarkerLocation + GetActorForwardVector() * (Sign * DepthOffset);
+}
+
+FVector AStorageShelf::GetAtlasWorkLocation(int32 FloorIndex, int32 SlotIndex, EWorkZoneType ZoneType) const
+{
+	return ComputeWorkLocation(GetSlotMarkerTransform(FloorIndex, SlotIndex).GetLocation(), ZoneType, AtlasWorkDistance);
+}
+
+FVector AStorageShelf::GetTransportRobotWorkLocation(int32 FloorIndex, int32 SlotIndex, EWorkZoneType ZoneType) const
+{
+	return ComputeWorkLocation(GetSlotMarkerTransform(FloorIndex, SlotIndex).GetLocation(), ZoneType, TransportRobotWorkDistance);
 }
 
 int32 AStorageShelf::ToSlotArrayIndex(int32 FloorIndex, int32 SlotIndex)
