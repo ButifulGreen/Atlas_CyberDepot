@@ -8,6 +8,24 @@
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 
+void AMSmartFactoryManager::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// EItemType 개수(3개)만큼 슬롯을 채우고 Fisher-Yates로 셔플 — 이번 세션 동안 고정.
+	ItemTypeToMeshSlot = { 0, 1, 2 };
+	for (int32 Index = ItemTypeToMeshSlot.Num() - 1; Index > 0; --Index)
+	{
+		const int32 SwapIndex = FMath::RandRange(0, Index);
+		ItemTypeToMeshSlot.Swap(Index, SwapIndex);
+	}
+}
+
 void AMSmartFactoryManager::AdjustReputation(float Delta, FName Reason)
 {
 	ReputationScore += Delta;
@@ -99,4 +117,5 @@ void AMSmartFactoryManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMSmartFactoryManager, ReputationScore);
+	DOREPLIFETIME(AMSmartFactoryManager, ItemTypeToMeshSlot);
 }

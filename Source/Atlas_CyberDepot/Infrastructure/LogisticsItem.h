@@ -10,6 +10,8 @@
 
 class AStorageShelf;
 class UStaticMesh;
+class UStaticMeshComponent;
+class USceneComponent;
 
 // Docs/06_Infrastructure.md §6 — 4단계 대상.
 UCLASS()
@@ -24,7 +26,7 @@ public:
 	FGuid ItemID;
 
 	// 클라이언트가 외형(메시)을 결정하는 데 필요해 Replicated로 지정
-	UPROPERTY(Replicated, BlueprintReadOnly)
+	UPROPERTY(ReplicatedUsing = OnRep_ItemType, BlueprintReadOnly)
 	EItemType ItemType = EItemType::ItemA;
 
 	UPROPERTY(BlueprintReadOnly)
@@ -36,6 +38,27 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+
+	// 서버가 스폰 직후 ItemType을 바꾸는 경우, OnRep은 클라이언트에서만 자동 호출되므로
+	// AFactoryAgentBase::SetState 사례처럼 서버 쪽에서는 UpdateItemMesh를 직접 호출해야 한다.
+	UFUNCTION()
+	void OnRep_ItemType();
+
+private:
+	void UpdateItemMesh();
+
+	UPROPERTY(VisibleAnywhere, Category = "Mesh")
+	TObjectPtr<USceneComponent> ItemRoot;
+
+	// 3종 고정 — 실제 메시 에셋은 BP_LogisticsItem에서 각 컴포넌트에 지정, ItemType에 맞는 것 하나만 보이게 전환
+	UPROPERTY(VisibleAnywhere, Category = "Mesh")
+	TObjectPtr<UStaticMeshComponent> MeshItemA;
+
+	UPROPERTY(VisibleAnywhere, Category = "Mesh")
+	TObjectPtr<UStaticMeshComponent> MeshItemB;
+
+	UPROPERTY(VisibleAnywhere, Category = "Mesh")
+	TObjectPtr<UStaticMeshComponent> MeshItemC;
 };
 
 USTRUCT(BlueprintType)
