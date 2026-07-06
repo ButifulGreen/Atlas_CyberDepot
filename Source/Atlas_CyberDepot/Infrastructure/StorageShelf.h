@@ -111,6 +111,10 @@ public:
 	void ConfirmInbound(int32 FloorIndex, int32 SlotIndex, ALogisticsItem* Item);
 	void ConfirmOutboundRemoved(int32 FloorIndex, int32 SlotIndex);
 
+	// 6단계 신규 — 슬롯 예약(ReserveNextSlot)과 실제 인출(TransferItem)이 시점상 분리되면서,
+	// 예약 시점에 받았던 아이템 포인터를 나중에 다시 조회할 수 있어야 해서 추가.
+	ALogisticsItem* GetItemAt(int32 FloorIndex, int32 SlotIndex) const;
+
 	bool IsFull() const;
 	int32 GetOccupiedCount() const;
 

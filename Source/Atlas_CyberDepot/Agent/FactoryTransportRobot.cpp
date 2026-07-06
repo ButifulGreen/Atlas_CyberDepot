@@ -56,6 +56,12 @@ void AFactoryTransportRobot::AcceptTransportTask(const FTransportTask& Task)
 {
 	CurrentTask = Task;
 
+	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+	{
+		SetState(EAgentState::Moving);
+		AIController->RequestMoveWithFilter(GetTaskPointLocation(Task.PickupPoint.Get(), true));
+	}
+
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UFactoryEventBusSubsystem* EventBus = GI->GetSubsystem<UFactoryEventBusSubsystem>())
@@ -73,29 +79,8 @@ void AFactoryTransportRobot::AcceptTransportTask(const FTransportTask& Task)
 	}
 }
 
-void AFactoryTransportRobot::OnItemPickedUp()
+void AFactoryTransportRobot::OnItemGivenByAtlas(ALogisticsItem* Item)
 {
-	AActor* PickupActor = CurrentTask.PickupPoint.Get();
-	ALogisticsItem* Item = nullptr;
-
-	if (AStorageShelf* Shelf = Cast<AStorageShelf>(PickupActor))
-	{
-		int32 FloorIndex = 0;
-		int32 SlotIndex = 0;
-		if (Shelf->TryReserveOldestOccupiedSlot(FloorIndex, SlotIndex, Item) && Item)
-		{
-			Shelf->ConfirmOutboundRemoved(FloorIndex, SlotIndex);
-		}
-	}
-	else if (AHorizontalTray* Tray = Cast<AHorizontalTray>(PickupActor))
-	{
-		Item = Tray->CurrentItem.Get();
-		if (Item)
-		{
-			Tray->OnItemCleared();
-		}
-	}
-
 	PayloadItem = Item;
 	if (Item && GetMesh())
 	{
@@ -117,6 +102,46 @@ void AFactoryTransportRobot::OnItemPickedUp()
 			EventBus->PublishTaskLifecycle(Event);
 		}
 	}
+
+	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+	{
+		SetState(EAgentState::Moving);
+		AIController->RequestMoveWithFilter(GetTaskPointLocation(CurrentTask.DropoffPoint.Get(), false));
+	}
+}
+
+void AFactoryTransportRobot::OnItemCollectedByAtlas()
+{
+	if (PayloadItem)
+	{
+		PayloadItem->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+		PayloadItem = nullptr;
+	}
+
+	OnTaskCompleted();
+}
+
+void AFactoryTransportRobot::OnArrivedAtDestination()
+{
+	// 도착 후 스스로 트레이/선반을 건드리지 않고 파킹 — 아틀라스가 TransferItem으로 다가와야 다음 단계로 넘어간다.
+	SetState(EAgentState::Working);
+	EvaluateRotationOrContinue();
+}
+
+FVector AFactoryTransportRobot::GetTaskPointLocation(AActor* PointActor, bool bIsPickupSide) const
+{
+	if (const AHorizontalTray* Tray = Cast<AHorizontalTray>(PointActor))
+	{
+		return Tray->GetTransportRobotWorkLocation();
+	}
+
+	if (const AStorageShelf* Shelf = Cast<AStorageShelf>(PointActor))
+	{
+		const FTransform& Staging = bIsPickupSide ? Shelf->OutboundStagingTransform : Shelf->InboundStagingTransform;
+		return Staging.GetLocation();
+	}
+
+	return PointActor ? PointActor->GetActorLocation() : FVector::ZeroVector;
 }
 
 void AFactoryTransportRobot::EvaluateRotationOrContinue()
@@ -202,48 +227,64 @@ void AFactoryTransportRobot::OnEnterBlockedState()
 			if (FVector::DistSquared(Zone->GetActorLocation(), MyLocation) <= FMath::Square(BlockedZoneRegisterRadius))
 			{
 				Zone->RegisterBlocker(this);
+				RegisteredBlockedZones.Add(Zone);
 			}
 		}
 	}
 }
 
+void AFactoryTransportRobot::OnBlockedTick(float DeltaTime)
+{
+	Super::OnBlockedTick(DeltaTime);
+
+	if (!bHasRegisteredBlocker)
+	{
+		bHasRegisteredBlocker = true;
+		OnEnterBlockedState();
+	}
+}
+
+void AFactoryTransportRobot::OnUnblocked()
+{
+	Super::OnUnblocked();
+
+	if (!bHasRegisteredBlocker)
+	{
+		return;
+	}
+
+	for (const TWeakObjectPtr<ACostZoneVolume>& ZoneRef : RegisteredBlockedZones)
+	{
+		if (ACostZoneVolume* Zone = ZoneRef.Get())
+		{
+			Zone->UnregisterBlocker(this);
+		}
+	}
+
+	RegisteredBlockedZones.Reset();
+	bHasRegisteredBlocker = false;
+}
+
 void AFactoryTransportRobot::OnTaskCompleted()
 {
-	if (AActor* DropoffActor = CurrentTask.DropoffPoint.Get())
-	{
-		if (AStorageShelf* Shelf = Cast<AStorageShelf>(DropoffActor))
-		{
-			int32 FloorIndex = 0;
-			int32 SlotIndex = 0;
-			if (PayloadItem && Shelf->TryReserveEmptySlot(FloorIndex, SlotIndex))
-			{
-				Shelf->ConfirmInbound(FloorIndex, SlotIndex, PayloadItem);
-			}
-		}
-		else if (AHorizontalTray* Tray = Cast<AHorizontalTray>(DropoffActor))
-		{
-			if (PayloadItem)
-			{
-				Tray->OnItemPlacedByAtlas(PayloadItem);
-			}
-		}
-	}
-
-	if (PayloadItem)
-	{
-		PayloadItem->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-		PayloadItem = nullptr;
-	}
-
+	SetState(EAgentState::Idle);
 	++OperationCount;
 
 	const FGuid CompletedTaskID = CurrentTask.TaskID;
-	if (UOutboundDispatchSubsystem* Dispatch = GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>())
+	UOutboundDispatchSubsystem* Dispatch = GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>();
+	if (Dispatch)
 	{
 		Dispatch->OnTransportTaskCompleted(CompletedTaskID, this);
 	}
 
 	CurrentTask = FTransportTask();
+
+	// 유휴 전환 즉시 다음 트립을 스스로 이어받는다(Pull 방식 재배정).
+	if (Dispatch)
+	{
+		FTransportTask NewTask;
+		Dispatch->TryAssignIdleTransportRobot(this, NewTask);
+	}
 
 	if (OperationCount < MaintenanceThreshold)
 	{

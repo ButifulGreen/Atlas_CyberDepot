@@ -9,6 +9,7 @@
 
 class ALogisticsItem;
 class URepairProgressComponent;
+class AFactoryTransportRobot;
 
 USTRUCT(BlueprintType)
 struct FPendingSlotReservation
@@ -59,6 +60,11 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 	FPendingSlotReservation PendingSlotReservation;
 
+	// 6단계 신규 — HandoffStationAssignment가 이동 요청 전 채워 넣는, 아직 도착하지 않은 핸드오프 배정 ID.
+	// OnArrivedAtDestination에서 이 값이 유효하면 일반 작업 로직 대신 핸드오프 도착 처리를 우선한다.
+	UPROPERTY(BlueprintReadOnly)
+	FGuid PendingHandoffAssignmentID;
+
 	UPROPERTY()
 	TObjectPtr<URepairProgressComponent> RepairComponent;
 
@@ -73,10 +79,19 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "IK")
 	bool bIsReachingForItem = false;
 
+	// Docs에 없는 구현값 — 파트너(배송로봇) 대기 중 재시도 간격/탐색 반경.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|WorkZone")
+	float ZoneRetryIntervalSeconds = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|WorkZone")
+	float RendezvousSearchRadius = 300.f;
+
 	virtual bool IsMaintenanceDue() const override;
 	virtual float GetOperationRatio() const override;
 	virtual void ApplyRestDecay(int32 Amount) override;
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
+	virtual void OnArrivedAtDestination() override;
+	virtual void OnWorkingTick(float DeltaTime) override;
 	bool IsEligibleForQuickCheck() const;
 	void AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff = false);
 	void EvaluateRotationOrContinue();
@@ -90,4 +105,18 @@ private:
 	float ComputeCurrentBreakdownChance() const;
 	void AttachHeldItem(ALogisticsItem* Item);
 	void DetachHeldItem();
+
+	// 6단계 신규 — CurrentAssignment.ZoneType/TargetZoneOwner 기준으로 다음 슬롯을 예약해
+	// PendingSlotReservation에 기록한다(이동 목적지 계산을 위해 TransferItem보다 먼저 호출).
+	bool ReserveNextSlot();
+
+	// 6단계 신규 — 새 CurrentAssignment를 받은 직후 존 예약 + 첫 이동을 킥오프한다.
+	void StartCurrentAssignment();
+	// TrayWorkZone/ShelfIn·OutboundZone 배정을 이어간다(도착 직후, 또는 파트너 대기 재시도 중).
+	void ContinueShelfAssignment();
+	void ContinueTrayAssignment();
+	// 지정 위치 근방에서 아틀라스와 주고받을 준비가 된(짐 보유 여부가 bNeedsPayload와 일치하는) 배송로봇을 찾는다.
+	AFactoryTransportRobot* FindWaitingTransportRobot(const FVector& Location, bool bNeedsPayload) const;
+
+	float ZoneRetryTimer = 0.f;
 };
