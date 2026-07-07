@@ -20,10 +20,10 @@
 
 - 멤버
   - `EItemType BoundItemType`
-  - `TArray<FShelfSlot> Slots` (3층 × 9칸 = 27개, FloorIndex·SlotIndex로 식별)
+  - `TArray<FShelfSlot> Slots` (3층 × 9칸 = 27개, FloorIndex·SlotIndex로 식별. 버그 수정 — 레벨에 배치하는 `UStorageSlotMarkerComponent`가 1부터 시작하는 값으로 세팅되어 있어(0이 아님), `FloorIndex`/`SlotIndex`는 외부 인터페이스 전체(마커, `TryReserveEmptySlot`/`TryReserveOldestOccupiedSlot`의 Out 파라미터, `FTransportTask`/`FPendingSlotReservation`에 저장되는 값 등)에서 1-based로 통일한다. 내부 `Slots` 배열 인덱스로 변환할 때만 `ToSlotArrayIndex`가 -1 보정)
   - `TWeakObjectPtr<AFactoryAgentBase> InboundZoneOccupant` (좌측 구역, 아틀라스 1대 거점 제한)
   - `TWeakObjectPtr<AFactoryAgentBase> OutboundZoneOccupant` (우측 구역, 아틀라스 1대 거점 제한)
-  - `FTransform InboundStagingTransform`, `FTransform OutboundStagingTransform` (교대 핸드오프 시 대체 아틀라스가 실제 점유를 넘겨받기 전 대기하는 근접 지점 — `07_TaskAssignment.md`의 소프트 핸드오프 참고)
+  - `UInboundStagingMarkerComponent* InboundStagingMarker`, `UOutboundStagingMarkerComponent* OutboundStagingMarker` (설계 변경 — 배송로봇↔아틀라스 메인 사이클 핸드오프는 더 이상 이 지점을 쓰지 않는다. 슬롯별 (X,Y) 위치에서 직접 만나는 방식으로 바뀌었고, 이 마커는 이제 `07_TaskAssignment.md`의 소프트 핸드오프(교대/로테이션, 대기실 미배치로 현재 미사용)에서 대체 아틀라스가 대기하는 지점으로만 쓰인다. 버그 수정 — 원래 순수 `FTransform` 프로퍼티였는데 뷰포트에 기즈모가 안 보이고 기본값이 월드 원점이라 배치를 깜빡하기 쉬웠다. 슬롯 마커와 동일한 패턴의 씬 컴포넌트로 변경, `GetInboundStagingLocation()`/`GetOutboundStagingLocation()`으로 조회)
 - 함수
   - `bool TryReserveInboundZone(AFactoryAtlasRobot* Atlas)` / `void ReleaseInboundZone()`
   - `bool TryReserveOutboundZone(AFactoryAtlasRobot* Atlas)` / `void ReleaseOutboundZone()`
@@ -33,6 +33,7 @@
   - `void ConfirmOutboundRemoved(int32 FloorIndex, int32 SlotIndex)`
   - `bool IsFull() const`
   - `int32 GetOccupiedCount() const`
+  - `FVector GetAtlasWorkLocation(int32 FloorIndex, int32 SlotIndex, EWorkZoneType ZoneType) const` / `FVector GetTransportRobotWorkLocation(...)` (버그 수정 — 이동 목적지의 Z는 항상 선반 자신의 지상 높이로 고정한다. 아틀라스든 배송로봇이든 슬롯이 몇 층에 있든 항상 같은 지상 높이로 이동하고, 실제 층 높이까지 뻗는 건 IK(`CurrentIKHandTarget`, `GetSlotMarkerTransform`의 원본 Z 그대로 사용)뿐이다 — 배송로봇은 지상 이동체라 애초에 2층·3층 높이까지 갈 수 없다)
   - `void TransferZoneOccupancy(EWorkZoneType ZoneType, AFactoryAtlasRobot* From, AFactoryAtlasRobot* To)` (교대 핸드오프 시 `InboundZoneOccupant` 또는 `OutboundZoneOccupant`를 From→To로 원자적 교체. Release+Reserve를 단일 호출로 처리해 제3 아틀라스의 선점 방지. 이 호출은 To가 스테이징 트랜스폼에 도착한 시점에만 발생한다)
 
 ### `FShelfSlot` (USTRUCT)
@@ -49,8 +50,7 @@
   - `TWeakObjectPtr<ALogisticsItem> CurrentItem`
   - `bool bIsHaltedAtEnd`
   - `TWeakObjectPtr<AFactoryAgentBase> WorkZoneOccupant` (아틀라스+운송로봇 각 1대 제한 구역 점유자)
-  - `USceneComponent* WorkMarker` (5단계 후속 신규 — 트레이 피벗과 실제 작업 지점이 다를 수 있어 분리한 마커. 선반과 달리 지점이 1개뿐이라 Floor/Slot 태그 없음)
-  - `float AtlasWorkDistance`, `float TransportRobotWorkDistance` (Balance — 마커에서 트레이 정면축 한 방향으로만 뗀 거리, 선반과 달리 좌우 부호 반전 없음)
+  - `float AtlasWorkDistance`, `float TransportRobotWorkDistance` (Balance — `ItemEndMarker`에서 트레이 정면축 한 방향으로만 뗀 거리, 선반과 달리 좌우 부호 반전 없음. 버그 수정 — 원래 별도의 `WorkMarker` 컴포넌트를 기준으로 계산했으나, `ItemEndMarker`와 물리적으로 동기화해야 하는 중복 컴포넌트라 레벨에서 둘을 다르게 배치하면 엉뚱한 위치로 이동하는 버그가 있었다. `ItemEndMarker` 기준으로 직접 계산하도록 변경하고 `WorkMarker`는 제거)
   - `USceneComponent* ItemStartMarker`, `USceneComponent* ItemEndMarker` (5단계 후속 신규 — 물품이 처음 텔레포트되는 지점과 컨베이어가 멈추는 지점은 서로 다른 지점이라 분리. 기존 `TrayLength`로 끝점을 역산하던 방식은 제거)
 - 함수
   - `bool TryReserveWorkZone(AFactoryAgentBase* Agent)` / `void ReleaseWorkZone()`
