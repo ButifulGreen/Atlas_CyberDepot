@@ -10,6 +10,7 @@
 class ALogisticsItem;
 class URepairProgressComponent;
 class ACostZoneVolume;
+class UStaticMeshComponent;
 
 // Docs/04_Agent_AI.md §4 — 5단계 대상.
 // UOutboundDispatchSubsystem 호출부(07_TaskAssignment.md, 6단계)는 아직 없어 해당 지점만 주석 처리.
@@ -79,6 +80,9 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+protected:
+	virtual void BeginPlay() override;
+
 private:
 	float ComputeCurrentBreakdownChance() const;
 
@@ -91,4 +95,10 @@ private:
 
 	// OnEnterBlockedState에서 등록한 존들을 기억해뒀다가 OnUnblocked에서 그대로 해제한다.
 	TArray<TWeakObjectPtr<ACostZoneVolume>> RegisteredBlockedZones;
+
+	// 버그 수정 — 배송로봇은 스켈레탈 메시가 없는(ACharacter::GetMesh()가 항상 빈) 모델이라, 물품 소켓
+	// ("ItemSocket")은 실제로 BP에 추가된 스태틱 메시 컴포넌트 쪽에 있다. BeginPlay에서 그 컴포넌트를
+	// 찾아 캐싱해두고 OnItemGivenByAtlas가 GetMesh() 대신 이걸 부착 대상으로 쓴다.
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> BodyMeshComponent;
 };

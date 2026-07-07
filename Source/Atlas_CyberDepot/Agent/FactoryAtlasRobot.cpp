@@ -617,7 +617,15 @@ void AFactoryAtlasRobot::AttachHeldItem(ALogisticsItem* Item)
 	HeldItem = Item;
 	if (Item && GetMesh())
 	{
-		Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, HeldItemSocketName);
+		// 버그 수정 — 풀에서 꺼낸 물품은 콜리전이 켜져 있어(TryAcquireItem), 그대로 부착하면 아틀라스
+		// 콜리전과 겹쳐 물리 디페네트레이션으로 아틀라스가 멀리 튕겨나가는 문제가 있었다. 들려있는 동안은
+		// 아무와도 충돌할 필요가 없으므로 부착 시점에 꺼둔다.
+		Item->SetActorEnableCollision(false);
+
+		// 버그 수정 — 아직 스켈레탈 메시 애셋이 없는 상태(아트 미제작)에서 소켓 이름을 그대로 넘기면
+		// 매 틱 "No SkeletalMesh for Component" 경고가 반복 출력된다. 소켓이 실제로 있을 때만 지정.
+		const FName SocketName = GetMesh()->DoesSocketExist(HeldItemSocketName) ? HeldItemSocketName : NAME_None;
+		Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
 	}
 }
 
