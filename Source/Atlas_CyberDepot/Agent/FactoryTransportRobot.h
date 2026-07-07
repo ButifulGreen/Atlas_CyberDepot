@@ -21,16 +21,15 @@ class AFactoryTransportRobot : public AFactoryAgentBase
 public:
 	AFactoryTransportRobot();
 
-	static constexpr float MaxBreakdownChanceCap = 0.40f;
-
 	// 정지 상태가 이 반경 안의 ACostZoneVolume에 혼잡도로 반영되는 거리 (Docs에 없는 구현값)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Congestion")
 	float BlockedZoneRegisterRadius = 300.f;
 
-	UPROPERTY(BlueprintReadOnly)
+	// 디버깅 편의 — VisibleAnywhere 없이는 디테일 패널에 안 뜬다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	FTransportTask CurrentTask;
 
-	UPROPERTY(Replicated, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, Replicated, BlueprintReadOnly)
 	TObjectPtr<ALogisticsItem> PayloadItem;
 
 	UPROPERTY(BlueprintReadOnly)
@@ -44,6 +43,14 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
 	float BreakdownChanceOverageMultiplier = 0.02f;
+
+	// 버그 수정 — 플레이테스트로 조정될 값인데 static constexpr로 하드코딩돼 있어 재컴파일 없이 못 바꿨다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
+	float MaxBreakdownChanceCap = 0.40f;
+
+	// 버그 수정 — ComputeCurrentBreakdownChance의 매직넘버(5)를 노출.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
+	int32 OverageOperationsPerStep = 5;
 
 	UPROPERTY()
 	TObjectPtr<URepairProgressComponent> RepairComponent;

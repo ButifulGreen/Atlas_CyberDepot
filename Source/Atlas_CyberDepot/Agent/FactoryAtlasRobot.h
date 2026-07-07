@@ -16,13 +16,14 @@ struct FPendingSlotReservation
 {
 	GENERATED_BODY()
 
-	UPROPERTY()
+	// 디버깅 편의 — VisibleAnywhere 없이는 디테일 패널에 안 뜬다.
+	UPROPERTY(VisibleAnywhere)
 	bool bIsValid = false;
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere)
 	int32 FloorIndex = -1;
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere)
 	int32 SlotIndex = -1;
 };
 
@@ -37,12 +38,11 @@ class AFactoryAtlasRobot : public AFactoryAgentBase
 public:
 	AFactoryAtlasRobot();
 
-	static constexpr float MaxBreakdownChanceCap = 0.40f;
-
-	UPROPERTY(BlueprintReadOnly)
+	// 디버깅 편의 — VisibleAnywhere 없이는 디테일 패널에 안 뜬다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	FStationAssignment CurrentAssignment;
 
-	UPROPERTY(Replicated, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, Replicated, BlueprintReadOnly)
 	TObjectPtr<ALogisticsItem> HeldItem;
 
 	UPROPERTY(BlueprintReadOnly)
@@ -57,7 +57,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
 	float BreakdownChanceOverageMultiplier = 0.02f;
 
-	UPROPERTY(BlueprintReadOnly)
+	// 버그 수정 — 플레이테스트로 조정될 값인데 static constexpr로 하드코딩돼 있어 재컴파일 없이 못 바꿨다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
+	float MaxBreakdownChanceCap = 0.40f;
+
+	// 버그 수정 — ComputeCurrentBreakdownChance의 매직넘버(5)를 노출. OperationCount가
+	// MaintenanceThreshold를 이 값만큼 초과할 때마다 BreakdownChanceOverageMultiplier씩 누적된다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
+	int32 OverageOperationsPerStep = 5;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	FPendingSlotReservation PendingSlotReservation;
 
 	// 6단계 신규 — HandoffStationAssignment가 이동 요청 전 채워 넣는, 아직 도착하지 않은 핸드오프 배정 ID.

@@ -27,7 +27,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	EActorType AgentType = EActorType::AtlasRobot;
 
-	UPROPERTY(ReplicatedUsing = OnRep_CurrentState, BlueprintReadOnly)
+	// 디버깅 편의 — VisibleAnywhere 없이 BlueprintReadOnly만으로는 디테일 패널에 안 뜬다.
+	UPROPERTY(VisibleAnywhere, ReplicatedUsing = OnRep_CurrentState, BlueprintReadOnly)
 	EAgentState CurrentState = EAgentState::Idle;
 
 	UPROPERTY(BlueprintReadOnly)
