@@ -123,10 +123,19 @@ void AFactoryAIController::SetAvoidanceIgnoreActor(AActor* TargetActor, bool bIg
 		return;
 	}
 
+	// 버그 수정 — 상호 무시가 되려면 양쪽 다 "GroupsToAvoid에서 빼고 AvoidanceGroup엔 더한다"를
+	// 동일하게 적용해야 한다. 기존엔 My->GroupsToAvoid와 Target->AvoidanceGroup만 건드려
+	// My가 Target을 피하지 않게만 됐을 뿐, Target은 여전히 My를 피하려 했다.
 	MyCrowd->SetGroupsToAvoid(bIgnore
 		? (MyCrowd->GetGroupsToAvoid() & ~MaintenanceIgnoreAvoidanceGroup)
 		: (MyCrowd->GetGroupsToAvoid() | MaintenanceIgnoreAvoidanceGroup));
+	MyCrowd->SetAvoidanceGroup(bIgnore
+		? (MyCrowd->GetAvoidanceGroup() | MaintenanceIgnoreAvoidanceGroup)
+		: (MyCrowd->GetAvoidanceGroup() & ~MaintenanceIgnoreAvoidanceGroup));
 
+	TargetCrowd->SetGroupsToAvoid(bIgnore
+		? (TargetCrowd->GetGroupsToAvoid() & ~MaintenanceIgnoreAvoidanceGroup)
+		: (TargetCrowd->GetGroupsToAvoid() | MaintenanceIgnoreAvoidanceGroup));
 	TargetCrowd->SetAvoidanceGroup(bIgnore
 		? (TargetCrowd->GetAvoidanceGroup() | MaintenanceIgnoreAvoidanceGroup)
 		: (TargetCrowd->GetAvoidanceGroup() & ~MaintenanceIgnoreAvoidanceGroup));
