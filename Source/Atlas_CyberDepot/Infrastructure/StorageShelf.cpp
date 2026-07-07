@@ -18,6 +18,30 @@ void AStorageShelf::BeginPlay()
 	Super::BeginPlay();
 
 	GetComponents<UStorageSlotMarkerComponent>(SlotMarkers);
+	InboundStagingMarker = FindComponentByClass<UInboundStagingMarkerComponent>();
+	OutboundStagingMarker = FindComponentByClass<UOutboundStagingMarkerComponent>();
+}
+
+FVector AStorageShelf::GetInboundStagingLocation() const
+{
+	if (InboundStagingMarker)
+	{
+		return InboundStagingMarker->GetComponentLocation();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("AStorageShelf::GetInboundStagingLocation: InboundStagingMarker 컴포넌트가 없어 선반 자신의 위치로 대체합니다 (%s)"), *GetName());
+	return GetActorLocation();
+}
+
+FVector AStorageShelf::GetOutboundStagingLocation() const
+{
+	if (OutboundStagingMarker)
+	{
+		return OutboundStagingMarker->GetComponentLocation();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("AStorageShelf::GetOutboundStagingLocation: OutboundStagingMarker 컴포넌트가 없어 선반 자신의 위치로 대체합니다 (%s)"), *GetName());
+	return GetActorLocation();
 }
 
 FTransform AStorageShelf::GetSlotMarkerTransform(int32 FloorIndex, int32 SlotIndex) const
@@ -36,8 +60,13 @@ FTransform AStorageShelf::GetSlotMarkerTransform(int32 FloorIndex, int32 SlotInd
 
 FVector AStorageShelf::ComputeWorkLocation(const FVector& MarkerLocation, EWorkZoneType ZoneType, float DepthOffset) const
 {
+	// 버그 수정 — 이동 목적지는 층(Z)과 무관해야 한다. 1층이든 2층이든 3층이든 로봇은 같은 지상
+	// 높이에 서고, IK(CurrentIKHandTarget, GetSlotMarkerTransform 그대로 사용)만 실제 층 높이까지 뻗는다.
+	FVector GroundLocation = MarkerLocation;
+	GroundLocation.Z = GetActorLocation().Z;
+
 	const float Sign = (ZoneType == EWorkZoneType::ShelfInboundZone) ? 1.f : -1.f;
-	return MarkerLocation + GetActorForwardVector() * (Sign * DepthOffset);
+	return GroundLocation + GetActorForwardVector() * (Sign * DepthOffset);
 }
 
 FVector AStorageShelf::GetAtlasWorkLocation(int32 FloorIndex, int32 SlotIndex, EWorkZoneType ZoneType) const
