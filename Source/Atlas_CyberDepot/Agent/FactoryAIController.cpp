@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Agent/FactoryAIController.h"
+#include "Atlas_CyberDepot.h"
 #include "Agent/FactoryAgentBase.h"
 #include "AITypes.h"
 #include "GameFramework/Pawn.h"
@@ -45,6 +46,9 @@ void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFo
 
 	if (!Result.IsSuccess())
 	{
+		// 진단용 — 이동 실패는 아무 데도 알려지지 않아 에이전트가 Moving 상태에 영구히 멈춰있게 된다.
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 이동 실패(Code=%d) — CurrentState가 Moving에 멈춘 채로 남을 수 있음"),
+			GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code.GetValue()));
 		return;
 	}
 
