@@ -62,41 +62,75 @@ void UOutboundDispatchSubsystem::DecomposeOrder(const FDeliveryOrder& Order)
 			continue;
 		}
 
-		FStationAssignment Assignment;
-		Assignment.AssignmentID = FGuid::NewGuid();
-		Assignment.SourceOrderID = Order.OrderID;
-		Assignment.ZoneType = EWorkZoneType::ShelfOutboundZone;
-		Assignment.TargetZoneOwner = Shelf;
-		Assignment.RemainingCount = Pair.Value;
-		ActiveStationAssignments.Add(Assignment);
-
-		// 6단계 신규 — 아틀라스가 선반에서 인출한 물품을 배송로봇에게 넘기면, 그 배송로봇이 향할
-		// Outbound 트레이 쪽에도 별도의 TrayWorkZone 배정(같은 아틀라스가 담당)이 있어야 최종 적재가 된다.
+		// 아틀라스가 선반에서 인출한 물품을 배송로봇에게 넘기면, 그 배송로봇이 향할 Outbound 트레이 쪽에도
+		// 별도의 TrayWorkZone 배정(같은 아틀라스가 담당)이 있어야 최종 적재가 된다. 버그 수정 — 원래 이 확인이
+		// 선반 배정을 이미 만든 뒤에 있어서, 트레이를 못 찾으면 선반 배정만 덩그러니 남는 문제가 있었다.
 		AHorizontalTray* Tray = FindTrayForItemType(Pair.Key, ETrayDirection::Outbound);
 		if (!Tray)
 		{
 			continue;
 		}
 
+		FStationAssignment Assignment;
+		Assignment.AssignmentID = FGuid::NewGuid();
+		Assignment.SourceOrderID = Order.OrderID;
+		Assignment.ZoneType = EWorkZoneType::ShelfOutboundZone;
+		Assignment.TargetZoneOwner = Shelf;
+
 		FStationAssignment TrayAssignment;
 		TrayAssignment.AssignmentID = FGuid::NewGuid();
 		TrayAssignment.SourceOrderID = Order.OrderID;
 		TrayAssignment.ZoneType = EWorkZoneType::TrayWorkZone;
 		TrayAssignment.TargetZoneOwner = Tray;
-		TrayAssignment.RemainingCount = Pair.Value;
-		ActiveStationAssignments.Add(TrayAssignment);
 
-		// 배송로봇은 짐을 1개씩만 나르므로, 수량만큼 개별 트립을 큐에 넣는다.
+		// 버그 수정 — 슬롯을 아틀라스가 나중에 즉흥적으로 정하지 않고, 여기서 수량만큼 미리 예약해
+		// 아틀라스 배정(ReservedSlots)과 배송로봇의 개별 트립(FloorIndex/SlotIndex) 양쪽에 같이 싣는다.
+		// 배송로봇은 짐을 1개씩만 나르므로 트립도 수량만큼 개별 생성. 실제 재고가 요청보다 적으면
+		// 예약된 만큼만 진행한다. 버그 수정 — 아틀라스가 배송로봇을 거리로 추정 매칭하지 않도록, Shelf/Tray
+		// 두 배정의 ReservedSlots에 같은 TripTaskID(=이 트립의 FTransportTask::TaskID)를 함께 싣는다.
+		int32 ReservedCount = 0;
 		for (int32 TripIndex = 0; TripIndex < Pair.Value; ++TripIndex)
 		{
+			int32 FloorIndex = 0;
+			int32 SlotIndex = 0;
+			ALogisticsItem* Item = nullptr;
+			if (!Shelf->TryReserveOldestOccupiedSlot(FloorIndex, SlotIndex, Item))
+			{
+				break;
+			}
+
 			FTransportTask Task;
 			Task.TaskID = FGuid::NewGuid();
 			Task.SourceOrderID = Order.OrderID;
 			Task.PickupPoint = Shelf;
 			Task.DropoffPoint = Tray;
 			Task.ItemType = Pair.Key;
+			Task.FloorIndex = FloorIndex;
+			Task.SlotIndex = SlotIndex;
 			PendingTransportTasks.Add(Task);
+
+			FReservedSlotEntry ShelfSlotEntry;
+			ShelfSlotEntry.SlotCoord = FIntPoint(FloorIndex, SlotIndex);
+			ShelfSlotEntry.TripTaskID = Task.TaskID;
+			Assignment.ReservedSlots.Add(ShelfSlotEntry);
+
+			FReservedSlotEntry TraySlotEntry;
+			TraySlotEntry.TripTaskID = Task.TaskID;
+			TrayAssignment.ReservedSlots.Add(TraySlotEntry);
+
+			++ReservedCount;
 		}
+
+		if (ReservedCount <= 0)
+		{
+			continue;
+		}
+
+		Assignment.RemainingCount = ReservedCount;
+		ActiveStationAssignments.Add(Assignment);
+
+		TrayAssignment.RemainingCount = ReservedCount;
+		ActiveStationAssignments.Add(TrayAssignment);
 	}
 
 	TryDispatchIdleAgents();
@@ -142,11 +176,35 @@ void UOutboundDispatchSubsystem::EnqueueInboundWork(EItemType ItemType, AHorizon
 		return;
 	}
 
+	// 버그 수정 — 슬롯을 아틀라스가 나중에 즉흥적으로 정하지 않고, 여기서 미리 예약해
+	// 아틀라스 배정과 배송로봇 트립 양쪽에 같이 싣는다(둘 다 같은 슬롯 위치로 직접 이동).
+	int32 FloorIndex = 0;
+	int32 SlotIndex = 0;
+	if (!Shelf->TryReserveEmptySlot(FloorIndex, SlotIndex))
+	{
+		// 물리적으로 올릴 빈 슬롯이 없음 — 조용히 스킵(재고 포화는 Code:004로 별도 추적됨).
+		return;
+	}
+
+	FTransportTask Task;
+	Task.TaskID = FGuid::NewGuid();
+	Task.PickupPoint = Tray;
+	Task.DropoffPoint = Shelf;
+	Task.ItemType = ItemType;
+	Task.FloorIndex = FloorIndex;
+	Task.SlotIndex = SlotIndex;
+	PendingTransportTasks.Add(Task);
+
+	// 버그 수정 — Shelf/Tray 양쪽 배정에 같은 TripTaskID(=Task.TaskID)를 실어 아틀라스가 거리 대신
+	// 정확히 이 트립을 담당하는 배송로봇을 찾도록 한다.
 	FStationAssignment TrayAssignment;
 	TrayAssignment.AssignmentID = FGuid::NewGuid();
 	TrayAssignment.ZoneType = EWorkZoneType::TrayWorkZone;
 	TrayAssignment.TargetZoneOwner = Tray;
 	TrayAssignment.RemainingCount = 1;
+	FReservedSlotEntry TraySlotEntry;
+	TraySlotEntry.TripTaskID = Task.TaskID;
+	TrayAssignment.ReservedSlots.Add(TraySlotEntry);
 	ActiveStationAssignments.Add(TrayAssignment);
 
 	FStationAssignment ShelfAssignment;
@@ -154,14 +212,11 @@ void UOutboundDispatchSubsystem::EnqueueInboundWork(EItemType ItemType, AHorizon
 	ShelfAssignment.ZoneType = EWorkZoneType::ShelfInboundZone;
 	ShelfAssignment.TargetZoneOwner = Shelf;
 	ShelfAssignment.RemainingCount = 1;
+	FReservedSlotEntry ShelfSlotEntry;
+	ShelfSlotEntry.SlotCoord = FIntPoint(FloorIndex, SlotIndex);
+	ShelfSlotEntry.TripTaskID = Task.TaskID;
+	ShelfAssignment.ReservedSlots.Add(ShelfSlotEntry);
 	ActiveStationAssignments.Add(ShelfAssignment);
-
-	FTransportTask Task;
-	Task.TaskID = FGuid::NewGuid();
-	Task.PickupPoint = Tray;
-	Task.DropoffPoint = Shelf;
-	Task.ItemType = ItemType;
-	PendingTransportTasks.Add(Task);
 
 	TryDispatchIdleAgents();
 }
@@ -197,6 +252,23 @@ bool UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder(const FGuid& Order
 	return true;
 }
 
+bool UOutboundDispatchSubsystem::IsZoneOccupied(EWorkZoneType ZoneType, AActor* TargetZoneOwner) const
+{
+	if (const AStorageShelf* Shelf = Cast<AStorageShelf>(TargetZoneOwner))
+	{
+		return (ZoneType == EWorkZoneType::ShelfInboundZone)
+			? Shelf->InboundZoneOccupant.IsValid()
+			: Shelf->OutboundZoneOccupant.IsValid();
+	}
+
+	if (const AHorizontalTray* Tray = Cast<AHorizontalTray>(TargetZoneOwner))
+	{
+		return Tray->WorkZoneOccupant.IsValid();
+	}
+
+	return false;
+}
+
 bool UOutboundDispatchSubsystem::TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, FStationAssignment& OutAssignment)
 {
 	if (!Atlas)
@@ -206,13 +278,22 @@ bool UOutboundDispatchSubsystem::TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, F
 
 	for (FStationAssignment& Assignment : ActiveStationAssignments)
 	{
-		if (!Assignment.AssignedAtlas.IsValid() && Assignment.RemainingCount > 0)
+		if (Assignment.AssignedAtlas.IsValid() || Assignment.RemainingCount <= 0)
 		{
-			Assignment.AssignedAtlas = Atlas;
-			OutAssignment = Assignment;
-			Atlas->AcceptStationAssignment(Assignment);
-			return true;
+			continue;
 		}
+
+		// 같은 선반/트레이를 겨냥한 다른 배정이 이미 그 존을 점유 중이면 이번엔 건너뛴다 —
+		// StartCurrentAssignment의 TryReserve*Zone 실패로 배정이 미아가 되는 것을 방지.
+		if (IsZoneOccupied(Assignment.ZoneType, Assignment.TargetZoneOwner.Get()))
+		{
+			continue;
+		}
+
+		Assignment.AssignedAtlas = Atlas;
+		OutAssignment = Assignment;
+		Atlas->AcceptStationAssignment(Assignment);
+		return true;
 	}
 
 	return false;
@@ -259,13 +340,13 @@ void UOutboundDispatchSubsystem::HandoffStationAssignment(const FGuid& Assignmen
 
 	if (AStorageShelf* Shelf = Cast<AStorageShelf>(Assignment->TargetZoneOwner.Get()))
 	{
-		const FTransform StagingTransform = (Assignment->ZoneType == EWorkZoneType::ShelfInboundZone)
-			? Shelf->InboundStagingTransform
-			: Shelf->OutboundStagingTransform;
+		const FVector StagingLocation = (Assignment->ZoneType == EWorkZoneType::ShelfInboundZone)
+			? Shelf->GetInboundStagingLocation()
+			: Shelf->GetOutboundStagingLocation();
 
 		if (AFactoryAIController* AIController = Cast<AFactoryAIController>(To->GetController()))
 		{
-			AIController->RequestMoveWithFilter(StagingTransform.GetLocation());
+			AIController->RequestMoveWithFilter(StagingLocation);
 		}
 	}
 }

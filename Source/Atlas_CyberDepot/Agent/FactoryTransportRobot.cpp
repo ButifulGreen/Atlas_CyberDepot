@@ -73,7 +73,7 @@ float AFactoryTransportRobot::ComputeCurrentBreakdownChance() const
 		return 0.f;
 	}
 
-	const int32 OverageUnits = (OperationCount - MaintenanceThreshold) / 5;
+	const int32 OverageUnits = (OperationCount - MaintenanceThreshold) / OverageOperationsPerStep;
 	const float Chance = BreakdownChanceBase + static_cast<float>(OverageUnits) * BreakdownChanceOverageMultiplier;
 	return FMath::Min(Chance, MaxBreakdownChanceCap);
 }
@@ -171,8 +171,10 @@ FVector AFactoryTransportRobot::GetTaskPointLocation(AActor* PointActor, bool bI
 
 	if (const AStorageShelf* Shelf = Cast<AStorageShelf>(PointActor))
 	{
-		const FTransform& Staging = bIsPickupSide ? Shelf->OutboundStagingTransform : Shelf->InboundStagingTransform;
-		return Staging.GetLocation();
+		// 버그 수정 — 별도 스테이징 지점이 아니라, 이번 트립이 실려 온 정확한 슬롯의 (X,Y) 위치로
+		// 아틀라스와 직접 만난다(층 높이는 ComputeWorkLocation이 지상으로 고정해서 무시됨).
+		const EWorkZoneType ZoneType = bIsPickupSide ? EWorkZoneType::ShelfOutboundZone : EWorkZoneType::ShelfInboundZone;
+		return Shelf->GetTransportRobotWorkLocation(CurrentTask.FloorIndex, CurrentTask.SlotIndex, ZoneType);
 	}
 
 	return PointActor ? PointActor->GetActorLocation() : FVector::ZeroVector;
