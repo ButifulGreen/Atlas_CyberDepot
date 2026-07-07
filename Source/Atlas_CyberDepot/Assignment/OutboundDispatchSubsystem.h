@@ -67,7 +67,15 @@ public:
 	// TrayWorkZone(Tray) + ShelfInboundZone(Shelf) 배정과 이를 잇는 FTransportTask를 생성한다.
 	void EnqueueInboundWork(EItemType ItemType, AHorizontalTray* Tray, AStorageShelf* Shelf);
 
-private:
+	// 재사용을 위해 public으로 노출 — InventoryOrderSubsystem이 동일한 조회 로직을 다시 구현하지 않고 가져다 쓴다.
 	AStorageShelf* FindShelfForItemType(EItemType ItemType) const;
 	AHorizontalTray* FindTrayForItemType(EItemType ItemType, ETrayDirection Direction) const;
+
+private:
+	// 버그 수정 — 같은 품목을 요청하는 두 주문이 같은 선반/트레이에 대해 각자 별도의 FStationAssignment를
+	// 만들어내는 경우, 두 유휴 아틀라스가 동시에 배정받으면 나중에 배정된 쪽은 StartCurrentAssignment의
+	// TryReserve*Zone이 실패해 CurrentState==Idle인 채로 배정만 영구히 남는 문제가 있었다.
+	// 배정 자체를 병합하는 대신, 배정 시점에 물리적 존이 이미 점유돼 있으면 그 배정을 건너뛰어
+	// (여전히 미배정 상태로 큐에 남겨) 다른 로봇이 나중에 자연스럽게 집어가게 한다.
+	bool IsZoneOccupied(EWorkZoneType ZoneType, AActor* TargetZoneOwner) const;
 };

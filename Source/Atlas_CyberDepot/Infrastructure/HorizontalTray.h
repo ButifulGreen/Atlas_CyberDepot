@@ -43,11 +43,10 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	TWeakObjectPtr<AFactoryAgentBase> WorkZoneOccupant;
 
-	// 5단계 신규 — 트레이 피벗과 실제 작업 지점(예: 컨베이어 끝, 물품이 멈추는 곳)이 다를 수 있어
-	// 별도 마커로 분리. 선반과 달리 트레이는 지점이 1개뿐이라 Floor/Slot 태그 없이 컴포넌트 하나만 둔다.
-	UPROPERTY(VisibleAnywhere, Category = "Work Position")
-	TObjectPtr<USceneComponent> WorkMarker;
-
+	// 버그 수정 — 아틀라스/배송로봇의 작업 위치는 물품이 실제로 멈춰서 상호작용 가능한 지점인
+	// ItemEndMarker를 기준으로 계산해야 한다. 별도의 WorkMarker는 ItemEndMarker와 물리적으로
+	// 동기화해야 하는 중복 컴포넌트였고, 레벨에서 둘을 다르게 배치하면 엉뚱한 위치로 이동하는
+	// 버그가 생겨 제거했다.
 	// 5단계 신규 — 물품이 처음 텔레포트되는 지점과, 컨베이어를 타고 이동해서 멈추는 지점은 서로 다른 지점이라 분리.
 	UPROPERTY(VisibleAnywhere, Category = "Work Position")
 	TObjectPtr<USceneComponent> ItemStartMarker;

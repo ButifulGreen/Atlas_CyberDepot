@@ -19,7 +19,7 @@
   - `virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override` (6단계 신규 — `Result.IsSuccess()`일 때 `Cast<AFactoryAgentBase>(GetPawn())->OnArrivedAtDestination()` 호출)
   - `void RequestMoveWithFilter(const FVector& Destination)` (이동 요청 직전 `ApplyDynamicCongestionCost`를 통해 `QueryFilterClass` 인스턴스의 AreaCost를 현재 혼잡도 기준으로 갱신한 뒤 이동 요청)
   - `void ApplyDynamicCongestionCost(UNavigationQueryFilter* Filter)` (경로 주변 `ACostZoneVolume`들의 `GetCurrentCostMultiplier()`를 조회해 Filter의 AreaCost에 반영. NavMesh 지오메트리는 건드리지 않음 — `08_Navigation.md` 참고)
-  - `void SetAvoidanceIgnoreActor(AActor* TargetActor, bool bIgnore)` (Crowd Avoidance 컴포넌트에서 특정 액터를 무시/재고려 대상으로 토글. NPC가 `AssignedMaintenanceTarget`에 접근할 때 사용)
+  - `void SetAvoidanceIgnoreActor(AActor* TargetActor, bool bIgnore)` (Crowd Avoidance 컴포넌트에서 특정 액터를 무시/재고려 대상으로 토글. NPC가 `AssignedMaintenanceTarget`에 접근할 때 사용. 버그 수정 — 기존엔 `My->GroupsToAvoid`와 `Target->AvoidanceGroup`만 바꿔 My만 Target을 무시하게 됐고 Target은 계속 My를 피하려 했다. 이제 My/Target 양쪽 모두 `GroupsToAvoid`/`AvoidanceGroup` 두 필드를 동일하게 토글해 진짜 상호 무시가 되도록 수정)
 
 ### `FPendingSlotReservation` (USTRUCT)
 아틀라스가 `TransferItem` 도중 고장났을 때 수리 완료 후 재개(Resume)에 필요한 슬롯 정보를 보존한다. `bIsValid == false`이면 현재 진행 중인 예약이 없음을 의미한다.
@@ -30,11 +30,11 @@
 ### `AFactoryAtlasRobot` (AFactoryAgentBase)
 - 멤버
   - `FStationAssignment CurrentAssignment` (거점 배정, 비어있으면 유휴 상태)
-  - `ALogisticsItem* HeldItem` (동시에 1개만 보유; 로봇 스켈레탈 메시 전용 소켓에 `AttachToComponent`로 부착. 물리 홀딩 미사용)
+  - `ALogisticsItem* HeldItem` (동시에 1개만 보유; 로봇 스켈레탈 메시 전용 소켓에 `AttachToComponent`로 부착. 물리 홀딩 미사용. 버그 수정 — 부착 직전 `SetActorEnableCollision(false)` 호출 추가. `ALogisticsItemSpawner::TryAcquireItem`이 풀에서 꺼내며 콜리전을 켜두는데, 그 상태로 그대로 부착하면 아틀라스 콜리전과 겹쳐 물리 디페네트레이션으로 아틀라스가 멀리 튕겨나가는 문제가 있었다)
   - `int32 OperationCount`, `int32 MaintenanceThreshold`
   - `float BreakdownChanceBase`, `float BreakdownChanceOverageMultiplier`
-  - `static constexpr float MaxBreakdownChanceCap = 0.40f` (고장 확률 상한 40%; `OperationCount >= MaintenanceThreshold` 이후 5회 단위로 확률이 누적되지만 이 값을 초과하지 않음)
-  - `FPendingSlotReservation PendingSlotReservation` (`ReserveNextSlot`이 채우고 `TransferItem`이 사용 후 초기화; 고장 후 재개 시 `ConfirmInbound`/`ConfirmOutboundRemoved` 호출 지점 복원에 사용)
+  - `float MaxBreakdownChanceCap = 0.40f` (고장 확률 상한, Balance 노출. 버그 수정 — 원래 `static constexpr`로 하드코딩돼 있어 재컴파일 없이 조정 불가했음. `OperationCount >= MaintenanceThreshold` 이후 `OverageOperationsPerStep`(Balance 노출, 기본 5)회 단위로 확률이 누적되지만 이 값을 초과하지 않음)
+  - `FPendingSlotReservation PendingSlotReservation` (`PopNextReservedSlot`이 `CurrentAssignment.ReservedSlots` 큐에서 채우고, 그 슬롯의 leg가 완전히 끝날 때(로컬 상호작용 + 로봇 핸드오프 양쪽 성공)만 `TransferItem`이 초기화; 고장 후 재개 시 `ConfirmInbound`/`ConfirmOutboundRemoved` 호출 지점 복원에도 사용. `FloorIndex`/`SlotIndex`(Shelf 전용) 외에 `FGuid TripTaskID`도 함께 들고 있다 — 아래 `FindWaitingTransportRobot` 참고)
   - `FGuid PendingHandoffAssignmentID` (6단계 신규 — `HandoffStationAssignment`가 이동 요청 전 채워 넣는, 아직 도착하지 않은 핸드오프 배정 ID. `OnArrivedAtDestination`에서 이 값이 유효하면 일반 작업 로직 대신 `OnHandoffAtlasArrivedAtStagingPoint` 호출을 우선한다)
   - `URepairProgressComponent* RepairComponent`
 - 함수
@@ -42,21 +42,21 @@
   - `bool IsEligibleForQuickCheck() const` (`CurrentState == Idle && bIsParkedInIdleZone && IsMaintenanceDue()`)
   - `void AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff = false)` (`UOutboundDispatchSubsystem`이 호출. 신규 배정 시 `StartCurrentAssignment()`로 존 예약+첫 이동을 킥오프하고 `FTaskLifecycleEvent(Assigned)` 발행; 핸드오프 인수(`bIsHandoff=true`) 시에는 이미 스테이징 지점에 도착해 있는 상태라 킥오프 없이 `CurrentAssignment`만 갱신)
   - `void EvaluateRotationOrContinue()` (이동/작업 재시도 진입점(`OnArrivedAtDestination`, `OnWorkingTick`)에서 호출. ① 고장 확률 롤 — 실패 시 `SetState(Broken)`. ② 통과 시 `IsMaintenanceDue()` 확인 — true이고 대기실에 초기화 로봇이 있으면 `UOutboundDispatchSubsystem::HandoffStationAssignment` 요청 후 대기실로 이동; 교대 불가 시 계속 진행)
-  - `void TransferItem(AActor* Source, AActor* Destination)` (선반 슬롯/트레이/배송로봇 사이의 단일 전달 동작. `Source`/`Destination`이 `AFactoryTransportRobot*`이면 소켓 대 소켓으로 직접 주고받고 로봇 쪽 `OnItemCollectedByAtlas`/`OnItemGivenByAtlas`를 호출한다. 선반 분기는 `PendingSlotReservation`이 이미 유효하다고 가정하고 재예약하지 않는다)
-  - `bool ReserveNextSlot()` (6단계 신규, private — `CurrentAssignment` 기준으로 `TryReserveEmptySlot`/`TryReserveOldestOccupiedSlot`을 호출해 `PendingSlotReservation`을 채운다. 이동 목적지 계산이 `TransferItem`보다 먼저 필요해서 분리)
-  - `void StartCurrentAssignment()` (6단계 신규, private — 신규 `CurrentAssignment`에 대해 존 예약 + 첫 이동 요청)
+  - `bool TransferItem(AActor* Source, AActor* Destination)` (선반 슬롯/트레이/배송로봇 사이의 단일 전달 동작. `Source`/`Destination`이 `AFactoryTransportRobot*`이면 소켓 대 소켓으로 직접 주고받고 로봇 쪽 `OnItemCollectedByAtlas`/`OnItemGivenByAtlas`를 호출한다. 선반 분기는 `PendingSlotReservation`이 이미 유효하다고 가정하고 재예약하지 않으며, 한 leg의 중간 단계(예: 인출 후 배송로봇에게 넘기기 전)에서는 `PendingSlotReservation`을 지우지 않는다 — leg의 마지막 단계(선반에 놓기)에서만 지운다. 버그 수정 — `bIsReachingForItem`을 `false`로 되돌리는 시점을 즉시가 아니라 `IKReachHoldSeconds`(기본 0.5초) 뒤 `ClearIKReachFlag`가 타이머로 처리하도록 변경 — 한 함수 호출 안에서 true/false가 동기적으로 토글되면 매 프레임 한 번만 값을 읽는 ABP가 true를 절대 관측 못해 IK 리치 애니메이션이 실제 게임플레이에서 전혀 트리거되지 않는 문제가 있었다. 버그 수정 — 반환형을 `bool`로 바꾸고, `RemainingCount` 감소를 호출부의 별도 문장이 아니라 Destination 분기(선반/트레이/배송로봇에 실제로 넘겨준 시점)에서 직접 처리하도록 이동 — 호출부가 성공 여부를 확인 안 하고 무조건 감소시키던 방식은 슬롯 재예약 실패 등으로 실제 전달이 안 됐는데도 카운트가 줄어 물건이 손에 남은 채 배정이 거짓 완료되는 문제가 있었다)
+  - `bool PopNextReservedSlot()` (버그 수정 — 기존 `ReserveNextSlot`을 대체. 슬롯은 더 이상 아틀라스가 그때그때 정하지 않고 작업 생성 시점(`UOutboundDispatchSubsystem::DecomposeOrder`/`EnqueueInboundWork`)에 이미 예약돼 있다. `CurrentAssignment.ReservedSlots` 큐 맨 앞(`FReservedSlotEntry`)을 꺼내 `PendingSlotReservation`에 `FloorIndex`/`SlotIndex`/`TripTaskID`를 기록할 뿐, 선반에 새로 예약을 걸지 않는다. Shelf뿐 아니라 Tray 배정도 트립마다 이 큐를 채워 `TripTaskID`만 소비한다 — `SlotCoord`는 (-1,-1) 고정)
+  - `void StartCurrentAssignment()` (6단계 신규, private — 신규 `CurrentAssignment`에 대해 존 예약 + `PopNextReservedSlot()`으로 첫 트립을 꺼내 그 위치로 첫 이동 요청. Shelf 계열은 Inbound/Outbound 모두 동일하게 슬롯 위치로 직접 이동하며 별도 스테이징 단계가 없다. Tray도 물리적 이동 목적지는 하나뿐이지만 `TripTaskID` 확보를 위해 동일하게 `PopNextReservedSlot()`을 호출한다)
   - `void ContinueShelfAssignment()` / `void ContinueTrayAssignment()` (6단계 신규, private — `OnArrivedAtDestination`/`OnWorkingTick`이 호출. emit/receive 통일 처리는 `07_TaskAssignment.md` 참고)
-  - `AFactoryTransportRobot* FindWaitingTransportRobot(const FVector& Location, bool bNeedsPayload) const` (6단계 신규, private — `RendezvousSearchRadius` 안에서 짐 보유 여부가 일치하는 배송로봇 탐색)
+  - `AFactoryTransportRobot* FindWaitingTransportRobot(const FGuid& TripTaskID, bool bNeedsPayload) const` (6단계 신규, private. 버그 수정 — 원래 목적지 좌표 반경(`RendezvousSearchRadius`) 안에서 짐 보유 여부만 일치하면 아무 배송로봇이나 매칭했는데, 반경 튜닝값에 따라 실제로 도착한 로봇과도 어긋나는 문제가 반복됐다(300→100 조정 후에도 121 거리로 재발). 거리 추정을 완전히 폐기하고, 월드의 배송로봇 중 `CurrentTask.TaskID == TripTaskID`인 로봇 하나를 정확히 찾아 `CurrentState == Working`(도착 완료) + 짐 보유 상태 일치까지 확인한 뒤에만 반환한다. `RendezvousSearchRadius` 프로퍼티는 제거됨)
   - `void OnAssignmentExhausted()` (RemainingCount==0, 거점 이탈 후 유휴 상태 전환 → `OnTaskCompleted()` 호출 → `UOutboundDispatchSubsystem::OnStationAssignmentCompleted` 경유로 `FTaskLifecycleEvent(Completed)` 발행 → 유휴 전환 즉시 `Dispatch->TryAssignIdleAtlas(this, ...)`로 다음 배정을 스스로 이어받는다)
   - `void OnTaskCompleted()` (`OperationCount` 증가; 누적 고장 확률은 `OperationCount >= MaintenanceThreshold` 이후 `BreakdownChanceBase + (초과 5회 단위 × BreakdownChanceOverageMultiplier)`로 계산하되 `MaxBreakdownChanceCap`으로 상한 고정. 임계치 초과가 지속되면 `Code:003` 발행 시 현재 확률값을 `FAnomalyEvent::RiskValue`에 기록)
 
 ### `AFactoryTransportRobot` (AFactoryAgentBase)
 - 멤버
   - `FTransportTask CurrentTask` (트립 작업, 비어있으면 유휴 상태)
-  - `ALogisticsItem* PayloadItem` (항상 최대 1개; 로봇 전용 소켓에 `AttachToComponent`로 부착)
+  - `ALogisticsItem* PayloadItem` (항상 최대 1개; 로봇 전용 소켓에 `AttachToComponent`로 부착. 버그 수정 — `AFactoryAtlasRobot::HeldItem`과 동일하게 부착 직전 콜리전을 꺼서 물리 디페네트레이션 튕김을 방지)
   - `int32 OperationCount`, `int32 MaintenanceThreshold`
   - `float BreakdownChanceBase`, `float BreakdownChanceOverageMultiplier`
-  - `static constexpr float MaxBreakdownChanceCap = 0.40f`
+  - `float MaxBreakdownChanceCap = 0.40f`, `int32 OverageOperationsPerStep = 5` (둘 다 Balance 노출. 버그 수정 — 원래 `MaxBreakdownChanceCap`은 `static constexpr`, 초과 단위 5는 매직넘버로 하드코딩돼 있어 재컴파일 없이 조정 불가했음)
   - `URepairProgressComponent* RepairComponent`
 - 함수
   - `bool IsMaintenanceDue() const` (`OperationCount >= MaintenanceThreshold`)

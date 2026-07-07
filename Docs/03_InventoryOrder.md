@@ -3,7 +3,7 @@
 > Atlas_CyberDepot 아키텍처 설계안 v5 — §3. 구현 6단계(배정/디스패치)와 함께 진행.
 
 ### `UInventoryOrderSubsystem` (UWorldSubsystem)
-- 멤버: `TMap<EItemType, FStockLineState> StockLines`
+- 멤버: `TMap<EItemType, FStockLineState> StockLines` (6단계 신규 — `OnWorldBeginPlay`가 서버 권한에서 `EItemType` 전 종류를 기본값으로 채워 넣는다. 이 초기화가 없으면 `TryPlaceOrder`가 항상 실패하던 누락이었음)
 - 함수
   - `bool TryPlaceOrder(EItemType ItemType, int32 Quantity)` (8단계 — 전용 플레이어 개념이 없어져 `AFactoryPlayerController::Server_SubmitKioskOrder` 경유로 누구나 호출 가능. 5단계 후속 — 재고 잠금 통과 시 `AHorizontalTray::BoundItemType`이 일치하는 Inbound 트레이를 찾아 비어있으면 `ALogisticsItemSpawner::TryAcquireItem`으로 풀에서 물품을 꺼내 `OnItemSpawnedAtStart` 호출. 트레이가 이미 점유 중이면 이번 호출에선 물리적으로 올리지 않고 주문만 유효 처리 — Quantity>1의 나머지 수량을 트레이가 빌 때마다 이어서 흘려보내는 대기열은 아직 없음, 후속 과제. 6단계 신규 — 물품을 실제로 올린 직후, 같은 `ItemType`의 선반을 찾아 `UOutboundDispatchSubsystem::EnqueueInboundWork(ItemType, Tray, Shelf)`를 호출해 트레이→선반 이동 작업(아틀라스 배정 2건 + 배송로봇 트립 1건)을 생성한다 — `07_TaskAssignment.md` 참고)
   - `void OnInboundArrived(EItemType ItemType, int32 Quantity)`
@@ -18,6 +18,7 @@
 - 멤버: `TArray<FDeliveryOrder> ActiveOrders`, `float OrderRefreshIntervalSeconds`
 - 함수
   - `void RefreshOrderList()`
+  - `bool TryPlaceTestOrder(EItemType ItemType, int32 Quantity)` (Docs에 없는 구현값 — 6단계 사이클 테스트용, `BlueprintCallable`. `RefreshOrderList`가 아직 신규 주문을 생성하지 않아(품목/수량 랜덤화 규칙 미정, 후속 밸런싱 단계) 지정한 품목/수량으로 `FDeliveryOrder`를 즉석 생성해 `ActiveOrders`에 추가한 뒤 바로 `TryAcceptOrder`까지 호출한다)
   - `bool TryAcceptOrder(const FGuid& OrderID)` (수락 시 `UOutboundDispatchSubsystem::DecomposeOrder` 호출. 서버 게임스레드에서 순차 처리되어 동시에 여러 플레이어/현실 키오스크가 같은 주문을 승인 시도해도 먼저 처리된 쪽만 성공 — 별도 타임스탬프 큐잉 불필요)
   - `bool TryCancelOrder(const FGuid& OrderID)` (8단계 — `Status == Accepted`이고 `UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder`가 성공(아직 로봇 미배정)할 때만 `Status`를 `Cancelled`로 전환)
   - `void OnOrderExpired(const FGuid& OrderID)`

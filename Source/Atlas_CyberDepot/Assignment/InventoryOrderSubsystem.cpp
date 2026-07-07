@@ -9,6 +9,27 @@
 #include "Infrastructure/StorageShelf.h"
 #include "Kismet/GameplayStatics.h"
 
+void UInventoryOrderSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	if (InWorld.GetNetMode() == NM_Client)
+	{
+		return;
+	}
+
+	for (uint8 Index = 0; Index <= static_cast<uint8>(EItemType::ItemC); ++Index)
+	{
+		const EItemType ItemType = static_cast<EItemType>(Index);
+		if (!StockLines.Contains(ItemType))
+		{
+			FStockLineState Line;
+			Line.ItemType = ItemType;
+			StockLines.Add(ItemType, Line);
+		}
+	}
+}
+
 bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
 {
 	const FStockLineState* Line = StockLines.Find(ItemType);
@@ -23,21 +44,15 @@ bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
 		return true;
 	}
 
-	// 해당 품목을 담당하는 입고 트레이를 찾는다 — 비어있지 않으면 지금은 못 올리고 다음 기회에 재시도한다
-	// (Quantity가 1보다 큰 경우 나머지 수량을 이어서 흘려보내는 대기열은 아직 없음, 후속 과제).
-	AHorizontalTray* InboundTray = nullptr;
-	TArray<AActor*> FoundTrays;
-	UGameplayStatics::GetAllActorsOfClass(World, AHorizontalTray::StaticClass(), FoundTrays);
-	for (AActor* Actor : FoundTrays)
+	UOutboundDispatchSubsystem* Dispatch = World->GetSubsystem<UOutboundDispatchSubsystem>();
+	if (!Dispatch)
 	{
-		AHorizontalTray* Tray = Cast<AHorizontalTray>(Actor);
-		if (Tray && Tray->Direction == ETrayDirection::Inbound && Tray->BoundItemType == ItemType)
-		{
-			InboundTray = Tray;
-			break;
-		}
+		return true;
 	}
 
+	// 해당 품목을 담당하는 입고 트레이를 찾는다 — 비어있지 않으면 지금은 못 올리고 다음 기회에 재시도한다
+	// (Quantity가 1보다 큰 경우 나머지 수량을 이어서 흘려보내는 대기열은 아직 없음, 후속 과제).
+	AHorizontalTray* InboundTray = Dispatch->FindTrayForItemType(ItemType, ETrayDirection::Inbound);
 	if (!InboundTray || InboundTray->CurrentItem.IsValid())
 	{
 		return true;
@@ -54,24 +69,9 @@ bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
 			InboundTray->OnItemSpawnedAtStart(Item);
 
 			// 6단계 신규 — 트레이에 올린 물품을 선반까지 옮길 아틀라스/배송로봇 작업을 생성한다.
-			AStorageShelf* TargetShelf = nullptr;
-			TArray<AActor*> FoundShelves;
-			UGameplayStatics::GetAllActorsOfClass(World, AStorageShelf::StaticClass(), FoundShelves);
-			for (AActor* ShelfActor : FoundShelves)
+			if (AStorageShelf* TargetShelf = Dispatch->FindShelfForItemType(ItemType))
 			{
-				if (AStorageShelf* Shelf = Cast<AStorageShelf>(ShelfActor); Shelf && Shelf->BoundItemType == ItemType)
-				{
-					TargetShelf = Shelf;
-					break;
-				}
-			}
-
-			if (TargetShelf)
-			{
-				if (UOutboundDispatchSubsystem* Dispatch = World->GetSubsystem<UOutboundDispatchSubsystem>())
-				{
-					Dispatch->EnqueueInboundWork(ItemType, InboundTray, TargetShelf);
-				}
+				Dispatch->EnqueueInboundWork(ItemType, InboundTray, TargetShelf);
 			}
 			break;
 		}

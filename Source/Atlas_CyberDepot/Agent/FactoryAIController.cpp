@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Agent/FactoryAIController.h"
+#include "Atlas_CyberDepot.h"
 #include "Agent/FactoryAgentBase.h"
 #include "AITypes.h"
 #include "GameFramework/Pawn.h"
@@ -45,6 +46,9 @@ void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFo
 
 	if (!Result.IsSuccess())
 	{
+		// 진단용 — 이동 실패는 아무 데도 알려지지 않아 에이전트가 Moving 상태에 영구히 멈춰있게 된다.
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 이동 실패(Code=%d) — CurrentState가 Moving에 멈춘 채로 남을 수 있음"),
+			GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code.GetValue()));
 		return;
 	}
 
@@ -119,10 +123,19 @@ void AFactoryAIController::SetAvoidanceIgnoreActor(AActor* TargetActor, bool bIg
 		return;
 	}
 
+	// 버그 수정 — 상호 무시가 되려면 양쪽 다 "GroupsToAvoid에서 빼고 AvoidanceGroup엔 더한다"를
+	// 동일하게 적용해야 한다. 기존엔 My->GroupsToAvoid와 Target->AvoidanceGroup만 건드려
+	// My가 Target을 피하지 않게만 됐을 뿐, Target은 여전히 My를 피하려 했다.
 	MyCrowd->SetGroupsToAvoid(bIgnore
 		? (MyCrowd->GetGroupsToAvoid() & ~MaintenanceIgnoreAvoidanceGroup)
 		: (MyCrowd->GetGroupsToAvoid() | MaintenanceIgnoreAvoidanceGroup));
+	MyCrowd->SetAvoidanceGroup(bIgnore
+		? (MyCrowd->GetAvoidanceGroup() | MaintenanceIgnoreAvoidanceGroup)
+		: (MyCrowd->GetAvoidanceGroup() & ~MaintenanceIgnoreAvoidanceGroup));
 
+	TargetCrowd->SetGroupsToAvoid(bIgnore
+		? (TargetCrowd->GetGroupsToAvoid() & ~MaintenanceIgnoreAvoidanceGroup)
+		: (TargetCrowd->GetGroupsToAvoid() | MaintenanceIgnoreAvoidanceGroup));
 	TargetCrowd->SetAvoidanceGroup(bIgnore
 		? (TargetCrowd->GetAvoidanceGroup() | MaintenanceIgnoreAvoidanceGroup)
 		: (TargetCrowd->GetAvoidanceGroup() & ~MaintenanceIgnoreAvoidanceGroup));

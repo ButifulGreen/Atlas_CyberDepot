@@ -4,3 +4,5 @@
 #include "Modules/ModuleManager.h"
 
 IMPLEMENT_PRIMARY_GAME_MODULE( FDefaultGameModuleImpl, Atlas_CyberDepot, "Atlas_CyberDepot" );
+
+DEFINE_LOG_CATEGORY(LogFactoryDispatch);

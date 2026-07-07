@@ -18,6 +18,30 @@ void AStorageShelf::BeginPlay()
 	Super::BeginPlay();
 
 	GetComponents<UStorageSlotMarkerComponent>(SlotMarkers);
+	InboundStagingMarker = FindComponentByClass<UInboundStagingMarkerComponent>();
+	OutboundStagingMarker = FindComponentByClass<UOutboundStagingMarkerComponent>();
+}
+
+FVector AStorageShelf::GetInboundStagingLocation() const
+{
+	if (InboundStagingMarker)
+	{
+		return InboundStagingMarker->GetComponentLocation();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("AStorageShelf::GetInboundStagingLocation: InboundStagingMarker 컴포넌트가 없어 선반 자신의 위치로 대체합니다 (%s)"), *GetName());
+	return GetActorLocation();
+}
+
+FVector AStorageShelf::GetOutboundStagingLocation() const
+{
+	if (OutboundStagingMarker)
+	{
+		return OutboundStagingMarker->GetComponentLocation();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("AStorageShelf::GetOutboundStagingLocation: OutboundStagingMarker 컴포넌트가 없어 선반 자신의 위치로 대체합니다 (%s)"), *GetName());
+	return GetActorLocation();
 }
 
 FTransform AStorageShelf::GetSlotMarkerTransform(int32 FloorIndex, int32 SlotIndex) const
@@ -36,8 +60,13 @@ FTransform AStorageShelf::GetSlotMarkerTransform(int32 FloorIndex, int32 SlotInd
 
 FVector AStorageShelf::ComputeWorkLocation(const FVector& MarkerLocation, EWorkZoneType ZoneType, float DepthOffset) const
 {
+	// 버그 수정 — 이동 목적지는 층(Z)과 무관해야 한다. 1층이든 2층이든 3층이든 로봇은 같은 지상
+	// 높이에 서고, IK(CurrentIKHandTarget, GetSlotMarkerTransform 그대로 사용)만 실제 층 높이까지 뻗는다.
+	FVector GroundLocation = MarkerLocation;
+	GroundLocation.Z = GetActorLocation().Z;
+
 	const float Sign = (ZoneType == EWorkZoneType::ShelfInboundZone) ? 1.f : -1.f;
-	return MarkerLocation + GetActorForwardVector() * (Sign * DepthOffset);
+	return GroundLocation + GetActorForwardVector() * (Sign * DepthOffset);
 }
 
 FVector AStorageShelf::GetAtlasWorkLocation(int32 FloorIndex, int32 SlotIndex, EWorkZoneType ZoneType) const
@@ -52,7 +81,10 @@ FVector AStorageShelf::GetTransportRobotWorkLocation(int32 FloorIndex, int32 Slo
 
 int32 AStorageShelf::ToSlotArrayIndex(int32 FloorIndex, int32 SlotIndex)
 {
-	return FloorIndex * NumSlotsPerFloor + SlotIndex;
+	// 버그 수정 — 레벨의 UStorageSlotMarkerComponent가 1부터 시작하는 Floor/SlotIndex로 배치되어 있어
+	// (0이 아님), 외부에 노출되는 Floor/SlotIndex는 전부 1-based로 통일하고 내부 배열 인덱스로 변환할 때만
+	// 여기서 -1 보정한다.
+	return (FloorIndex - 1) * NumSlotsPerFloor + (SlotIndex - 1);
 }
 
 bool AStorageShelf::TryReserveInboundZone(AFactoryAgentBase* Atlas)
@@ -89,9 +121,10 @@ void AStorageShelf::ReleaseOutboundZone()
 
 bool AStorageShelf::TryReserveEmptySlot(int32& OutFloorIndex, int32& OutSlotIndex)
 {
-	for (int32 FloorIndex = 0; FloorIndex < NumFloors; ++FloorIndex)
+	// FloorIndex/SlotIndex는 1-based(레벨 마커 컨벤션과 동일)로 순회한다.
+	for (int32 FloorIndex = 1; FloorIndex <= NumFloors; ++FloorIndex)
 	{
-		for (int32 SlotIndex = 0; SlotIndex < NumSlotsPerFloor; ++SlotIndex)
+		for (int32 SlotIndex = 1; SlotIndex <= NumSlotsPerFloor; ++SlotIndex)
 		{
 			FShelfSlot& Slot = Slots[ToSlotArrayIndex(FloorIndex, SlotIndex)];
 			if (!Slot.OccupyingItem.IsValid() && !Slot.bReservedForInbound && !Slot.bReservedForOutbound)
@@ -128,8 +161,9 @@ bool AStorageShelf::TryReserveOldestOccupiedSlot(int32& OutFloorIndex, int32& Ou
 	}
 
 	Slots[BestIndex].bReservedForOutbound = true;
-	OutFloorIndex = BestIndex / NumSlotsPerFloor;
-	OutSlotIndex = BestIndex % NumSlotsPerFloor;
+	// 0-based 배열 인덱스를 1-based FloorIndex/SlotIndex로 변환(ToSlotArrayIndex와 대칭).
+	OutFloorIndex = BestIndex / NumSlotsPerFloor + 1;
+	OutSlotIndex = BestIndex % NumSlotsPerFloor + 1;
 	OutItem = Slots[BestIndex].OccupyingItem.Get();
 	return true;
 }

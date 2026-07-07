@@ -19,6 +19,23 @@ void UDeliveryOrderSubsystem::RefreshOrderList()
 	// 신규 주문 생성 규칙(품목/수량 랜덤화 등)은 밸런싱과 함께 정해지는 이후 단계에서 채운다.
 }
 
+bool UDeliveryOrderSubsystem::TryPlaceTestOrder(EItemType ItemType, int32 Quantity)
+{
+	if (Quantity <= 0)
+	{
+		return false;
+	}
+
+	FDeliveryOrder NewOrder;
+	NewOrder.OrderID = FGuid::NewGuid();
+	NewOrder.RequestedQuantities.Add(ItemType, Quantity);
+	NewOrder.Deadline = FDateTime::UtcNow() + FTimespan::FromSeconds(OrderRefreshIntervalSeconds);
+	NewOrder.Status = EOrderStatus::Available;
+
+	ActiveOrders.Add(NewOrder);
+	return TryAcceptOrder(NewOrder.OrderID);
+}
+
 bool UDeliveryOrderSubsystem::TryAcceptOrder(const FGuid& OrderID)
 {
 	FDeliveryOrder* Order = ActiveOrders.FindByPredicate([&OrderID](const FDeliveryOrder& O)

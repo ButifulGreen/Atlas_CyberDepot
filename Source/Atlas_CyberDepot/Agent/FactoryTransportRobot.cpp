@@ -12,12 +12,38 @@
 #include "Repair/RepairProgressComponent.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
 
 AFactoryTransportRobot::AFactoryTransportRobot()
 {
 	AgentType = EActorType::TransportRobot;
 	RepairComponent = CreateDefaultSubobject<URepairProgressComponent>(TEXT("RepairComponent"));
+}
+
+void AFactoryTransportRobot::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// 버그 수정 — 이 로봇은 스켈레탈 메시가 없어 GetMesh()는 항상 빈 컴포넌트다. 실제 바디 겸 물품
+	// 소켓("ItemSocket")은 BP에 추가된 스태틱 메시 컴포넌트에 있으므로, 그 소켓을 실제로 가진
+	// 컴포넌트를 찾아 캐싱한다(못 찾으면 첫 스태틱 메시 컴포넌트로 대체).
+	TArray<UStaticMeshComponent*> StaticMeshComponents;
+	GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+
+	for (UStaticMeshComponent* Component : StaticMeshComponents)
+	{
+		if (Component && Component->DoesSocketExist(PayloadItemSocketName))
+		{
+			BodyMeshComponent = Component;
+			break;
+		}
+	}
+
+	if (!BodyMeshComponent && StaticMeshComponents.Num() > 0)
+	{
+		BodyMeshComponent = StaticMeshComponents[0];
+	}
 }
 
 bool AFactoryTransportRobot::IsMaintenanceDue() const
@@ -47,7 +73,7 @@ float AFactoryTransportRobot::ComputeCurrentBreakdownChance() const
 		return 0.f;
 	}
 
-	const int32 OverageUnits = (OperationCount - MaintenanceThreshold) / 5;
+	const int32 OverageUnits = (OperationCount - MaintenanceThreshold) / OverageOperationsPerStep;
 	const float Chance = BreakdownChanceBase + static_cast<float>(OverageUnits) * BreakdownChanceOverageMultiplier;
 	return FMath::Min(Chance, MaxBreakdownChanceCap);
 }
@@ -82,9 +108,17 @@ void AFactoryTransportRobot::AcceptTransportTask(const FTransportTask& Task)
 void AFactoryTransportRobot::OnItemGivenByAtlas(ALogisticsItem* Item)
 {
 	PayloadItem = Item;
-	if (Item && GetMesh())
+	if (Item && BodyMeshComponent)
 	{
-		Item->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, PayloadItemSocketName);
+		// 버그 수정 — 물품 콜리전이 켜진 채로 부착되면 배송로봇 콜리전과 겹쳐 물리 디페네트레이션이
+		// 발생할 수 있다(FactoryAtlasRobot::AttachHeldItem 참고). 들고 있는 동안은 콜리전이 필요 없다.
+		Item->SetActorEnableCollision(false);
+
+		// 버그 수정 — 이 로봇은 스켈레탈 메시가 없어 GetMesh()에 붙이면 소켓을 절대 못 찾아 매 틱
+		// "No SkeletalMesh for Component" 경고가 반복 출력됐다. 실제 소켓이 있는 BodyMeshComponent
+		// (BeginPlay에서 캐싱한 스태틱 메시 컴포넌트)에 부착한다.
+		const FName SocketName = BodyMeshComponent->DoesSocketExist(PayloadItemSocketName) ? PayloadItemSocketName : NAME_None;
+		Item->AttachToComponent(BodyMeshComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
 	}
 
 	if (UGameInstance* GI = GetGameInstance())
@@ -137,8 +171,10 @@ FVector AFactoryTransportRobot::GetTaskPointLocation(AActor* PointActor, bool bI
 
 	if (const AStorageShelf* Shelf = Cast<AStorageShelf>(PointActor))
 	{
-		const FTransform& Staging = bIsPickupSide ? Shelf->OutboundStagingTransform : Shelf->InboundStagingTransform;
-		return Staging.GetLocation();
+		// 버그 수정 — 별도 스테이징 지점이 아니라, 이번 트립이 실려 온 정확한 슬롯의 (X,Y) 위치로
+		// 아틀라스와 직접 만난다(층 높이는 ComputeWorkLocation이 지상으로 고정해서 무시됨).
+		const EWorkZoneType ZoneType = bIsPickupSide ? EWorkZoneType::ShelfOutboundZone : EWorkZoneType::ShelfInboundZone;
+		return Shelf->GetTransportRobotWorkLocation(CurrentTask.FloorIndex, CurrentTask.SlotIndex, ZoneType);
 	}
 
 	return PointActor ? PointActor->GetActorLocation() : FVector::ZeroVector;

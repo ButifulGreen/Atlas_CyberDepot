@@ -10,6 +10,7 @@
 class ALogisticsItem;
 class URepairProgressComponent;
 class ACostZoneVolume;
+class UStaticMeshComponent;
 
 // Docs/04_Agent_AI.md §4 — 5단계 대상.
 // UOutboundDispatchSubsystem 호출부(07_TaskAssignment.md, 6단계)는 아직 없어 해당 지점만 주석 처리.
@@ -21,16 +22,15 @@ class AFactoryTransportRobot : public AFactoryAgentBase
 public:
 	AFactoryTransportRobot();
 
-	static constexpr float MaxBreakdownChanceCap = 0.40f;
-
 	// 정지 상태가 이 반경 안의 ACostZoneVolume에 혼잡도로 반영되는 거리 (Docs에 없는 구현값)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Congestion")
 	float BlockedZoneRegisterRadius = 300.f;
 
-	UPROPERTY(BlueprintReadOnly)
+	// 디버깅 편의 — VisibleAnywhere 없이는 디테일 패널에 안 뜬다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	FTransportTask CurrentTask;
 
-	UPROPERTY(Replicated, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, Replicated, BlueprintReadOnly)
 	TObjectPtr<ALogisticsItem> PayloadItem;
 
 	UPROPERTY(BlueprintReadOnly)
@@ -44,6 +44,14 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
 	float BreakdownChanceOverageMultiplier = 0.02f;
+
+	// 버그 수정 — 플레이테스트로 조정될 값인데 static constexpr로 하드코딩돼 있어 재컴파일 없이 못 바꿨다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
+	float MaxBreakdownChanceCap = 0.40f;
+
+	// 버그 수정 — ComputeCurrentBreakdownChance의 매직넘버(5)를 노출.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
+	int32 OverageOperationsPerStep = 5;
 
 	UPROPERTY()
 	TObjectPtr<URepairProgressComponent> RepairComponent;
@@ -72,6 +80,9 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+protected:
+	virtual void BeginPlay() override;
+
 private:
 	float ComputeCurrentBreakdownChance() const;
 
@@ -84,4 +95,10 @@ private:
 
 	// OnEnterBlockedState에서 등록한 존들을 기억해뒀다가 OnUnblocked에서 그대로 해제한다.
 	TArray<TWeakObjectPtr<ACostZoneVolume>> RegisteredBlockedZones;
+
+	// 버그 수정 — 배송로봇은 스켈레탈 메시가 없는(ACharacter::GetMesh()가 항상 빈) 모델이라, 물품 소켓
+	// ("ItemSocket")은 실제로 BP에 추가된 스태틱 메시 컴포넌트 쪽에 있다. BeginPlay에서 그 컴포넌트를
+	// 찾아 캐싱해두고 OnItemGivenByAtlas가 GetMesh() 대신 이걸 부착 대상으로 쓴다.
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> BodyMeshComponent;
 };

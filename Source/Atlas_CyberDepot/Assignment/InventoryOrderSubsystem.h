@@ -39,7 +39,12 @@ public:
 
 	FOnLineLockChanged OnLineLockChanged;
 
+	UFUNCTION(BlueprintCallable)
 	bool TryPlaceOrder(EItemType ItemType, int32 Quantity);
 	void OnInboundArrived(EItemType ItemType, int32 Quantity);
 	bool IsLineLocked(EItemType ItemType) const;
+
+protected:
+	// 6단계 신규 — StockLines를 채우는 코드가 없어 TryPlaceOrder가 항상 실패하던 누락 보완.
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 };

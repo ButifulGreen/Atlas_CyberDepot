@@ -13,9 +13,6 @@ AHorizontalTray::AHorizontalTray()
 	USceneComponent* TrayRoot = CreateDefaultSubobject<USceneComponent>(TEXT("TrayRoot"));
 	RootComponent = TrayRoot;
 
-	WorkMarker = CreateDefaultSubobject<USceneComponent>(TEXT("WorkMarker"));
-	WorkMarker->SetupAttachment(TrayRoot);
-
 	ItemStartMarker = CreateDefaultSubobject<USceneComponent>(TEXT("ItemStartMarker"));
 	ItemStartMarker->SetupAttachment(TrayRoot);
 
@@ -30,7 +27,9 @@ void AHorizontalTray::BeginPlay()
 
 FVector AHorizontalTray::ComputeWorkLocation(float DepthOffset) const
 {
-	return WorkMarker->GetComponentLocation() + GetActorForwardVector() * DepthOffset;
+	// 버그 수정 — 아틀라스/배송로봇이 실제로 물품과 상호작용하는 지점은 항상 ItemEndMarker다
+	// (Inbound는 여기서 집고, Outbound는 여기에 놓는다 — OnItemPlacedByAtlas 참고).
+	return ItemEndMarker->GetComponentLocation() + GetActorForwardVector() * DepthOffset;
 }
 
 FVector AHorizontalTray::GetAtlasWorkLocation() const
