@@ -55,6 +55,13 @@ public:
 	FOnDeliveryResult OnDeliveryResult;
 
 	void RefreshOrderList();
+
+	// Docs에 없는 구현값 — 6단계 사이클 테스트용. 실제 주문 목록 갱신(RefreshOrderList)은 아직 신규 주문을
+	// 생성하지 않아(품목/수량 랜덤화 규칙 미정, 후속 밸런싱 단계), 지정한 품목/수량으로 주문을 즉석 생성해
+	// ActiveOrders에 추가한 뒤 바로 TryAcceptOrder까지 호출한다.
+	UFUNCTION(BlueprintCallable)
+	bool TryPlaceTestOrder(EItemType ItemType, int32 Quantity);
+
 	bool TryAcceptOrder(const FGuid& OrderID);
 	// 8단계 — Accepted 상태이면서 아직 로봇 배정 전인 주문만 취소 가능
 	bool TryCancelOrder(const FGuid& OrderID);
