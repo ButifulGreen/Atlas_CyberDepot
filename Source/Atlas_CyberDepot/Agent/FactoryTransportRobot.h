@@ -86,6 +86,9 @@ protected:
 private:
 	float ComputeCurrentBreakdownChance() const;
 
+	// 7단계 후속 — EvaluateRotationOrContinue가 자리를 비우기 전 확인하는 "교대 가능한 로봇이 있는가" 체크.
+	bool HasRestedTransportRobotAvailable() const;
+
 	// PickupPoint/DropoffPoint가 Tray면 GetTransportRobotWorkLocation(), Shelf면 방향에 맞는
 	// 스테이징 트랜스폼 위치를 반환한다(선반은 슬롯 개념이 없는 로봇 대기 지점 1곳뿐).
 	FVector GetTaskPointLocation(AActor* PointActor, bool bIsPickupSide) const;

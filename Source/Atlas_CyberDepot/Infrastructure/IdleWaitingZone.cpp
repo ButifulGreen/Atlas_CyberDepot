@@ -17,38 +17,61 @@ void AIdleWaitingZone::BeginPlay()
 {
 	Super::BeginPlay();
 
+	GetComponents<UParkingSlotMarkerComponent>(ParkingMarkers);
+
 	if (HasAuthority())
 	{
 		GetWorldTimerManager().SetTimer(RestDecayTimerHandle, this, &AIdleWaitingZone::OnRestDecayInterval, RestDecayIntervalSeconds, true);
 	}
 }
 
-bool AIdleWaitingZone::TryReserveSlot(AFactoryAgentBase* Agent, FTransform& OutSlotTransform)
+bool AIdleWaitingZone::TryOccupyHomeSlot(AFactoryAgentBase* Agent, int32 SlotIndex, FTransform& OutSlotTransform)
 {
 	if (!Agent)
 	{
 		return false;
 	}
 
-	for (int32 SlotIndex = 0; SlotIndex < ParkingSlots.Num(); ++SlotIndex)
+	const UParkingSlotMarkerComponent* TargetMarker = nullptr;
+	for (const UParkingSlotMarkerComponent* Marker : ParkingMarkers)
 	{
-		const TWeakObjectPtr<AFactoryAgentBase>* Occupant = SlotOccupancy.Find(SlotIndex);
-		if (!Occupant || !Occupant->IsValid())
+		if (Marker && Marker->SlotIndex == SlotIndex)
 		{
-			SlotOccupancy.Add(SlotIndex, Agent);
-			OutSlotTransform = ParkingSlots[SlotIndex];
-			Agent->bIsParkedInIdleZone = true;
-
-			if (AMSmartFactoryManager* Manager = GetWorld() ? GetWorld()->GetGameState<AMSmartFactoryManager>() : nullptr)
-			{
-				Manager->OnAgentBecameIdle(Agent);
-			}
-
-			return true;
+			TargetMarker = Marker;
+			break;
 		}
 	}
 
-	return false;
+	if (!TargetMarker)
+	{
+		return false;
+	}
+
+	SlotOccupancy.Add(SlotIndex, Agent);
+	OutSlotTransform = TargetMarker->GetComponentTransform();
+	Agent->bIsParkedInIdleZone = true;
+
+	if (AMSmartFactoryManager* Manager = GetWorld() ? GetWorld()->GetGameState<AMSmartFactoryManager>() : nullptr)
+	{
+		Manager->OnAgentBecameIdle(Agent);
+	}
+
+	return true;
+}
+
+void AIdleWaitingZone::AssignHomeSlots(TArray<AFactoryAgentBase*>& InOutRemainingAgents)
+{
+	for (const UParkingSlotMarkerComponent* Marker : ParkingMarkers)
+	{
+		if (!Marker || InOutRemainingAgents.Num() == 0)
+		{
+			break;
+		}
+
+		AFactoryAgentBase* Agent = InOutRemainingAgents[0];
+		InOutRemainingAgents.RemoveAt(0);
+		Agent->AssignHomeIdleZoneSlot(this, Marker->SlotIndex);
+	}
 }
 
 void AIdleWaitingZone::ReleaseSlot(AFactoryAgentBase* Agent)

@@ -80,6 +80,8 @@ float AFactoryTransportRobot::ComputeCurrentBreakdownChance() const
 
 void AFactoryTransportRobot::AcceptTransportTask(const FTransportTask& Task)
 {
+	LeaveIdleZoneIfParked();
+
 	CurrentTask = Task;
 
 	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
@@ -157,6 +159,11 @@ void AFactoryTransportRobot::OnItemCollectedByAtlas()
 
 void AFactoryTransportRobot::OnArrivedAtDestination()
 {
+	if (TryHandleIdleZoneArrival())
+	{
+		return;
+	}
+
 	// 도착 후 스스로 트레이/선반을 건드리지 않고 파킹 — 아틀라스가 TransferItem으로 다가와야 다음 단계로 넘어간다.
 	SetState(EAgentState::Working);
 	EvaluateRotationOrContinue();
@@ -218,30 +225,32 @@ void AFactoryTransportRobot::EvaluateRotationOrContinue()
 		return;
 	}
 
+	// 교대를 대신할 로봇이 대기실에 있을 때만 자리를 비운다 — 없으면 계속 작업을 이어간다.
+	if (!HasRestedTransportRobotAvailable())
+	{
+		return;
+	}
+
+	// 7단계 후속 — 대기실 검색 대신 자신의 고정 홈 슬롯(HomeIdleZone/HomeSlotIndex)으로 바로 이동한다
+	// (선입선출 없음). 이동/도착 처리는 TryHeadToIdleZone/TryHandleIdleZoneArrival과 완전히 동일한 경로.
+	TryHeadToIdleZone();
+}
+
+bool AFactoryTransportRobot::HasRestedTransportRobotAvailable() const
+{
 	TArray<AActor*> FoundZones;
 	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AIdleWaitingZone::StaticClass(), FoundZones);
 
 	for (AActor* ZoneActor : FoundZones)
 	{
 		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(ZoneActor);
-		if (!Zone || Zone->AllowedAgentType != EActorType::TransportRobot || !Zone->FindRestedOccupant())
+		if (Zone && Zone->AllowedAgentType == EActorType::TransportRobot && Zone->FindRestedOccupant())
 		{
-			continue;
-		}
-
-		FTransform SlotTransform;
-		if (Zone->TryReserveSlot(this, SlotTransform))
-		{
-			if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
-			{
-				AIController->RequestMoveWithFilter(SlotTransform.GetLocation());
-			}
-			SetState(EAgentState::Moving);
-			return;
+			return true;
 		}
 	}
 
-	// 교대할 자리를 못 찾으면 TryAssignIdleTransportRobot 경유로 다음 트립을 계속 수령한다(호출 측 책임).
+	return false;
 }
 
 void AFactoryTransportRobot::OnEnterBlockedState()
@@ -315,11 +324,15 @@ void AFactoryTransportRobot::OnTaskCompleted()
 
 	CurrentTask = FTransportTask();
 
-	// 유휴 전환 즉시 다음 트립을 스스로 이어받는다(Pull 방식 재배정).
+	// 유휴 전환 즉시 다음 트립을 스스로 이어받는다(Pull 방식 재배정). 다음 트립이 없으면 대기실로 향한다
+	// (7단계 신규 — "유휴 로봇은 항상 대기실로" 규칙).
 	if (Dispatch)
 	{
 		FTransportTask NewTask;
-		Dispatch->TryAssignIdleTransportRobot(this, NewTask);
+		if (!Dispatch->TryAssignIdleTransportRobot(this, NewTask))
+		{
+			TryHeadToIdleZone();
+		}
 	}
 
 	if (OperationCount < MaintenanceThreshold)

@@ -55,6 +55,8 @@ float AFactoryAtlasRobot::ComputeCurrentBreakdownChance() const
 
 void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff)
 {
+	LeaveIdleZoneIfParked();
+
 	CurrentAssignment = Assignment;
 
 	if (bIsHandoff)
@@ -299,6 +301,11 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 
 void AFactoryAtlasRobot::OnArrivedAtDestination()
 {
+	if (TryHandleIdleZoneArrival())
+	{
+		return;
+	}
+
 	if (PendingHandoffAssignmentID.IsValid())
 	{
 		const FGuid AssignmentID = PendingHandoffAssignmentID;

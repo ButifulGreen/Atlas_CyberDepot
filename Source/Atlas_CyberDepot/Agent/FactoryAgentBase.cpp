@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Agent/FactoryAgentBase.h"
+#include "Agent/FactoryAIController.h"
+#include "Infrastructure/IdleWaitingZone.h"
 #include "Net/UnrealNetwork.h"
 
 AFactoryAgentBase::AFactoryAgentBase()
@@ -75,6 +77,65 @@ void AFactoryAgentBase::OnBlockedTick(float DeltaTime)
 
 void AFactoryAgentBase::OnUnblocked()
 {
+}
+
+void AFactoryAgentBase::AssignHomeIdleZoneSlot(AIdleWaitingZone* Zone, int32 SlotIndex)
+{
+	HomeIdleZone = Zone;
+	HomeSlotIndex = SlotIndex;
+}
+
+bool AFactoryAgentBase::TryHeadToIdleZone()
+{
+	if (bIsParkedInIdleZone || bIsHeadingToIdleZone)
+	{
+		return true;
+	}
+
+	AIdleWaitingZone* Zone = HomeIdleZone.Get();
+	if (!Zone || HomeSlotIndex < 0)
+	{
+		return false;
+	}
+
+	AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController());
+	if (!AIController)
+	{
+		return false;
+	}
+
+	FTransform SlotTransform;
+	if (!Zone->TryOccupyHomeSlot(this, HomeSlotIndex, SlotTransform))
+	{
+		return false;
+	}
+
+	bIsHeadingToIdleZone = true;
+	SetState(EAgentState::Moving);
+	AIController->RequestMoveWithFilter(SlotTransform.GetLocation());
+	return true;
+}
+
+bool AFactoryAgentBase::TryHandleIdleZoneArrival()
+{
+	if (!bIsHeadingToIdleZone)
+	{
+		return false;
+	}
+
+	bIsHeadingToIdleZone = false;
+	SetState(EAgentState::Idle);
+	return true;
+}
+
+void AFactoryAgentBase::LeaveIdleZoneIfParked()
+{
+	if (AIdleWaitingZone* Zone = HomeIdleZone.Get())
+	{
+		Zone->ReleaseSlot(this);
+	}
+
+	bIsHeadingToIdleZone = false;
 }
 
 FStateSnapshot AFactoryAgentBase::ToSnapshot() const

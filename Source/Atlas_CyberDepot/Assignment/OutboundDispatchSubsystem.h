@@ -10,7 +10,9 @@
 
 class AFactoryAtlasRobot;
 class AFactoryTransportRobot;
+class AFactoryAgentBase;
 class AStorageShelf;
+class AIdleWaitingZone;
 struct FDeliveryOrder;
 
 USTRUCT()
@@ -71,7 +73,20 @@ public:
 	AStorageShelf* FindShelfForItemType(EItemType ItemType) const;
 	AHorizontalTray* FindTrayForItemType(EItemType ItemType, ETrayDirection Direction) const;
 
+protected:
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
 private:
+	// 7단계 후속 — "선입선출 없이 실행 시 1회만 고정 배정" 규칙. AllowedAgentType별로 레벨의 로봇과
+	// 대기실을 각각 이름순으로 정렬해 안정적인 순서를 보장한 뒤, 대기실을 순회하며 자기 마커 개수만큼
+	// 로봇을 소비시켜 AFactoryAgentBase::AssignHomeIdleZoneSlot으로 고정 배정한다.
+	void AssignHomeIdleZoneSlots();
+
+	// 버그 수정 — UWorldSubsystem::OnWorldBeginPlay는 UWorld::BeginPlay() 안에서 GameMode->StartPlay()보다
+	// 먼저 호출된다(엔진 World.cpp). 즉 이 시점엔 레벨의 어떤 액터도 아직 자신의 BeginPlay를 실행하지 않은
+	// 상태라, AIdleWaitingZone::ParkingMarkers(자기 BeginPlay에서 캐싱)가 항상 비어있어 AssignHomeIdleZoneSlots가
+	// 아무도 배정하지 못하고 조용히 실패했다. 다음 틱으로 미뤄 모든 액터의 BeginPlay가 끝난 뒤 실행한다.
+	void RunDeferredWorldBeginPlaySetup();
 	// 버그 수정 — 같은 품목을 요청하는 두 주문이 같은 선반/트레이에 대해 각자 별도의 FStationAssignment를
 	// 만들어내는 경우, 두 유휴 아틀라스가 동시에 배정받으면 나중에 배정된 쪽은 StartCurrentAssignment의
 	// TryReserve*Zone이 실패해 CurrentState==Idle인 채로 배정만 영구히 남는 문제가 있었다.
