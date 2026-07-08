@@ -8,6 +8,7 @@
 #include "FactoryAgentBase.generated.h"
 
 class URepairProgressComponent;
+class AIdleWaitingZone;
 
 // Docs/04_Agent_AI.md §4 — 아틀라스/운송로봇/NPC 공용 베이스. 2단계(스켈레톤) 대상.
 UCLASS()
@@ -42,10 +43,35 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 	bool bIsParkedInIdleZone = false;
 
+	// 7단계 후속 — 선입선출 없이 실행 시 1회만 고정 배정되는 홈 대기실/슬롯. UOutboundDispatchSubsystem::
+	// AssignHomeIdleZoneSlots가 레벨 시작 시 채운 뒤로는 세션 내내 그대로 유지된다(리플리케이트 안 함 —
+	// CurrentAssignment/PendingHandoffAssignmentID와 동일하게 서버 전용 부기 값).
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TWeakObjectPtr<AIdleWaitingZone> HomeIdleZone;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 HomeSlotIndex = -1;
+
+	// 대기실로 향해 이동하는 동안만 true(도착하면 즉시 false로 내려감). bIsParkedInIdleZone("지금 앉아있음")과
+	// 달리 "지금 그리로 가는 중"만을 뜻해, OnArrivedAtDestination이 이 도착이 대기실행인지 판별하는 용도.
+	UPROPERTY(BlueprintReadOnly)
+	bool bIsHeadingToIdleZone = false;
+
 	virtual void SetState(EAgentState NewState);
 	virtual void OnBlockedTick(float DeltaTime);
 	virtual void OnUnblocked();
 	FStateSnapshot ToSnapshot() const;
+
+	// 7단계 후속 — AIdleWaitingZone::AssignHomeSlots가 호출해 HomeIdleZone/HomeSlotIndex를 채운다.
+	void AssignHomeIdleZoneSlot(AIdleWaitingZone* Zone, int32 SlotIndex);
+	// 7단계 신규 — 유휴 상태(할 일 없음)면 항상 대기실로 향한다는 규칙의 공용 구현.
+	// Atlas/TransportRobot 양쪽에서 동일하게 쓰여 베이스에 한 번만 둔다. 자신의 고정 홈 슬롯으로만 이동하므로
+	// 검색/경합이 없다 — 이미 향하는 중이거나 파킹돼 있으면 즉시 true, 홈이 배정 안 됐으면 false.
+	bool TryHeadToIdleZone();
+	// OnArrivedAtDestination 맨 앞에서 호출 — 대기실로 향하던 중이었으면 Idle로 전환하고 true(호출부는 이후 로직을 건너뛴다).
+	bool TryHandleIdleZoneArrival();
+	// 파킹 중이던 로봇이 새 작업을 받을 때(AcceptStationAssignment/AcceptTransportTask 맨 앞) 호출. 파킹 중이 아니면 no-op.
+	void LeaveIdleZoneIfParked();
 
 	// AFactoryAIController::OnMoveCompleted가 이동 성공 시 호출. 아틀라스/운송로봇이 override해
 	// 도착 후 행동(TransferItem 등)을 트리거한다. 6단계 오케스트레이션 레이어에서 신규 추가.

@@ -2,12 +2,92 @@
 
 #include "Assignment/OutboundDispatchSubsystem.h"
 #include "Assignment/DeliveryOrderSubsystem.h"
+#include "Agent/FactoryAgentBase.h"
 #include "Agent/FactoryAtlasRobot.h"
 #include "Agent/FactoryTransportRobot.h"
 #include "Agent/FactoryAIController.h"
 #include "Infrastructure/StorageShelf.h"
+#include "Infrastructure/IdleWaitingZone.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
 #include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
+
+void UOutboundDispatchSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	// 버그 수정 — 이 시점엔 아직 어떤 액터의 BeginPlay도 실행되지 않았다(RunDeferredWorldBeginPlaySetup 주석 참고).
+	// 다음 틱으로 미뤄야 AIdleWaitingZone::ParkingMarkers 등이 정상적으로 채워진 뒤 배정할 수 있다.
+	InWorld.GetTimerManager().SetTimerForNextTick(this, &UOutboundDispatchSubsystem::RunDeferredWorldBeginPlaySetup);
+}
+
+void UOutboundDispatchSubsystem::RunDeferredWorldBeginPlaySetup()
+{
+	// 7단계 후속 — 로봇마다 대기실 홈 슬롯을 먼저 고정 배정한 뒤, 유휴 로봇 배차를 스윕한다
+	// (레벨에 배치된 로봇이 시작부터 유휴 상태면 곧장 자기 홈 슬롯으로 향하게 한다).
+	AssignHomeIdleZoneSlots();
+	TryDispatchIdleAgents();
+}
+
+void UOutboundDispatchSubsystem::AssignHomeIdleZoneSlots()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	auto AssignForType = [World](EActorType AgentType)
+	{
+		TArray<AActor*> FoundAgents;
+		UGameplayStatics::GetAllActorsOfClass(World, AFactoryAgentBase::StaticClass(), FoundAgents);
+
+		TArray<AFactoryAgentBase*> Agents;
+		for (AActor* Actor : FoundAgents)
+		{
+			if (AFactoryAgentBase* Agent = Cast<AFactoryAgentBase>(Actor))
+			{
+				if (Agent->AgentType == AgentType)
+				{
+					Agents.Add(Agent);
+				}
+			}
+		}
+
+		// 실행할 때마다 동일한 결과가 나오도록 이름순으로 정렬 — 레벨에 저장된 액터 이름은 실행마다 바뀌지 않는다.
+		Agents.Sort([](const AFactoryAgentBase& A, const AFactoryAgentBase& B) { return A.GetName() < B.GetName(); });
+
+		TArray<AActor*> FoundZones;
+		UGameplayStatics::GetAllActorsOfClass(World, AIdleWaitingZone::StaticClass(), FoundZones);
+
+		TArray<AIdleWaitingZone*> Zones;
+		for (AActor* Actor : FoundZones)
+		{
+			if (AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(Actor))
+			{
+				if (Zone->AllowedAgentType == AgentType)
+				{
+					Zones.Add(Zone);
+				}
+			}
+		}
+		Zones.Sort([](const AIdleWaitingZone& A, const AIdleWaitingZone& B) { return A.GetName() < B.GetName(); });
+
+		// 대기실을 순서대로 순회하며 각자의 마커 개수만큼 로봇을 소비한다. 대기실 배치(마커 총합)가 항상
+		// 로봇 수 이상이라고 가정하므로(사용자가 직접 배치), 로봇이 남는 경우는 고려하지 않는다.
+		for (AIdleWaitingZone* Zone : Zones)
+		{
+			if (Agents.Num() == 0)
+			{
+				break;
+			}
+			Zone->AssignHomeSlots(Agents);
+		}
+	};
+
+	AssignForType(EActorType::AtlasRobot);
+	AssignForType(EActorType::TransportRobot);
+}
 
 AStorageShelf* UOutboundDispatchSubsystem::FindShelfForItemType(EItemType ItemType) const
 {
@@ -152,7 +232,11 @@ void UOutboundDispatchSubsystem::TryDispatchIdleAgents()
 		if (Atlas && Atlas->CurrentState == EAgentState::Idle)
 		{
 			FStationAssignment Assignment;
-			TryAssignIdleAtlas(Atlas, Assignment);
+			// 7단계 신규 — 줄 작업이 없으면 대기실로 향한다("유휴 로봇은 항상 대기실로" 규칙).
+			if (!TryAssignIdleAtlas(Atlas, Assignment))
+			{
+				Atlas->TryHeadToIdleZone();
+			}
 		}
 	}
 
@@ -164,7 +248,10 @@ void UOutboundDispatchSubsystem::TryDispatchIdleAgents()
 		if (Robot && Robot->CurrentState == EAgentState::Idle)
 		{
 			FTransportTask Task;
-			TryAssignIdleTransportRobot(Robot, Task);
+			if (!TryAssignIdleTransportRobot(Robot, Task))
+			{
+				Robot->TryHeadToIdleZone();
+			}
 		}
 	}
 }

@@ -71,7 +71,7 @@
 - `TWeakObjectPtr<AFactoryAtlasRobot> To`
 - `EWorkZoneType ZoneType`
 
-> **알려진 제한사항(6단계)**: `HandoffStationAssignment`는 `ShelfOutboundZone` 교대 시 To를 `OutboundStagingTransform`으로 보내는데, Outbound 배정의 첫 다리는 원래 슬롯에서 시작해야 해서 완전히 정합하지 않는다. 대기실(`AIdleWaitingZone`)이 이번 6단계 스코프 밖(레벨 미배치)이라 실사용되지 않아 당장 영향은 없다 — 대기실/교대를 실제로 테스트하는 단계에서 재검토.
+> **알려진 제한사항(6단계, 7단계에도 유지)**: `HandoffStationAssignment`는 `ShelfOutboundZone` 교대 시 To를 `OutboundStagingTransform`으로 보내는데, Outbound 배정의 첫 다리는 원래 슬롯에서 시작해야 해서 완전히 정합하지 않는다. 또한 `OnHandoffAtlasArrivedAtStagingPoint`는 교대로 밀려난 From을 대기실로 보내는 처리가 아직 연결돼 있지 않다(코드 내 TODO 주석 참고) — 7단계에서 대기실 자체는 실사용 가능해졌지만(`TryHeadToIdleZone` 등), 로테이션/핸드오프 경로 자체는 이번에도 스코프 밖이라 그대로 둠. 로테이션을 실제로 테스트하는 단계에서 재검토.
 
 ### `UOutboundDispatchSubsystem` (UWorldSubsystem)
 주문을 거점 배정과 트립 작업으로 분해하고, 유휴 아틀라스/운송로봇에게 배정한다. 교대 시 거점 배정 소유권 이전을 담당한다.
@@ -89,6 +89,8 @@
   - `void OnHandoffAtlasArrivedAtStagingPoint(const FGuid& AssignmentID)` (To의 `AFactoryAIController::OnMoveCompleted`가 스테이징 지점 도착을 알리면 호출. `AStorageShelf::TransferZoneOccupancy` 호출로 점유를 From→To로 원자적 이전 → `FStationAssignment::AssignedAtlas`를 To로 교체 → To의 `AcceptStationAssignment` 호출 → From을 대기실로 이동 → `PendingHandoffs`에서 제거)
   - `void OnStationAssignmentCompleted(const FGuid& AssignmentID)` (RemainingCount==0, 아틀라스 재배치 가능 상태로 전환; `FTaskLifecycleEvent(Completed)` 발행)
   - `void OnTransportTaskCompleted(const FGuid& TaskID)` (`FTaskLifecycleEvent(Completed)` 발행)
-  - `void TryDispatchIdleAgents()` (6단계 신규 — 월드의 Idle 상태 아틀라스/배송로봇 전체를 훑어 `TryAssignIdleAtlas`/`TryAssignIdleTransportRobot`을 시도하는 Push 경로. `DecomposeOrder`/`EnqueueInboundWork`가 새 작업 생성 직후 호출해, 이미 대기 중이던 유휴 로봇이 놓치지 않고 새 작업을 받게 한다)
+  - `void TryDispatchIdleAgents()` (6단계 신규 — 월드의 Idle 상태 아틀라스/배송로봇 전체를 훑어 `TryAssignIdleAtlas`/`TryAssignIdleTransportRobot`을 시도하는 Push 경로. `DecomposeOrder`/`EnqueueInboundWork`가 새 작업 생성 직후 호출해, 이미 대기 중이던 유휴 로봇이 놓치지 않고 새 작업을 받게 한다. 7단계 후속 — 줄 작업이 없는 로봇은 `AFactoryAgentBase::TryHeadToIdleZone()`으로 자신의 고정 홈 슬롯으로 보낸다)
   - `void EnqueueInboundWork(EItemType ItemType, AHorizontalTray* Tray, AStorageShelf* Shelf)` (6단계 신규 — `UInventoryOrderSubsystem::TryPlaceOrder`가 Inbound 트레이에 물품을 올린 직후 호출. `Shelf->TryReserveEmptySlot`으로 슬롯을 먼저 예약(실패하면 조용히 스킵)한 뒤 `FTransportTask`(Pickup=Tray, Dropoff=Shelf, FloorIndex/SlotIndex 포함) 1건을 만들고, 그 `TaskID`를 `TrayWorkZone`(Tray) + `ShelfInboundZone`(Shelf, `ReservedSlots`에 해당 슬롯 SlotCoord 포함) 두 배정의 `ReservedSlots`에 같은 `TripTaskID`로 함께 실은 뒤 `TryDispatchIdleAgents()` 호출)
   - `AStorageShelf* FindShelfForItemType(EItemType ItemType) const` / `AHorizontalTray* FindTrayForItemType(EItemType ItemType, ETrayDirection Direction) const` (버그 수정 — 원래 private였는데, `UInventoryOrderSubsystem::TryPlaceOrder`가 동일한 조회 루프를 별도로 재구현하고 있어 public으로 열어 재사용하도록 변경)
+  - `void AssignHomeIdleZoneSlots()` (7단계 후속, private — "대기실은 선입선출이 아니라 실행 시 1회 고정 배정" 규칙. `EActorType`(Atlas/TransportRobot)별로 레벨의 로봇과 `AllowedAgentType`이 일치하는 `AIdleWaitingZone`을 각각 이름순으로 정렬(실행마다 동일한 결과 보장)한 뒤, 대기실을 순서대로 순회하며 `AIdleWaitingZone::AssignHomeSlots`로 자기 마커 개수만큼 로봇을 소비시킨다. 대기실 마커 총합이 항상 로봇 수 이상이라고 가정 — 로봇이 남는 경우는 다루지 않는다)
+  - `virtual void OnWorldBeginPlay(UWorld& InWorld) override` / `void RunDeferredWorldBeginPlaySetup()` (7단계 신규. 버그 수정 — `UWorldSubsystem::OnWorldBeginPlay`는 엔진의 `UWorld::BeginPlay()` 안에서 `GameMode->StartPlay()`(레벨의 모든 액터가 실제로 `BeginPlay()`를 실행하는 지점)보다 먼저 호출된다. 그 시점에 바로 `AssignHomeIdleZoneSlots()`를 부르면 `AIdleWaitingZone::ParkingMarkers`(자기 `BeginPlay`에서 캐싱)가 아직 비어있어 아무도 배정받지 못한 채 조용히 실패한다. `OnWorldBeginPlay`는 `SetTimerForNextTick`으로 `RunDeferredWorldBeginPlaySetup()`(`AssignHomeIdleZoneSlots()` → `TryDispatchIdleAgents()` 순서)을 다음 틱으로 미루기만 하고, 실제 배정/배차는 그 안에서 처리한다. `UInventoryOrderSubsystem`의 동일 훅은 `StockLines` 시딩만 하므로 이 문제에 해당하지 않음)
