@@ -76,12 +76,14 @@
 - `Idle` (조건 모니터링 중), `Active` (NPC 출동·배치 정비 진행 중)
 
 ### `AIdleWaitingZone` (AActor)
-아틀라스/운송로봇 전용 대기 공간. 업무 큐가 빈 로봇이 파킹하는 곳이며, 패시브 회복 감쇠(RestDecay)와 QuickCheck 정비가 가능한 유일한 장소. 대기 중인 로봇 전원이 위험 임계치(`IsMaintenanceDue() == true`) 상태일 때 NPC 배치 정비(Batch Maintenance)가 자동 발동된다.
+아틀라스/운송로봇 전용 대기 공간. 업무 큐가 빈 로봇이 파킹하는 곳이며, 패시브 회복 감쇠(RestDecay)와 QuickCheck 정비가 가능한 유일한 장소. 대기 중인 로봇 전원이 위험 임계치(`IsMaintenanceDue() == true`) 상태일 때 NPC 배치 정비(Batch Maintenance)가 자동 발동된다. 공간 제약상 레벨에 여러 개 분산 배치할 수 있으며(선반이 품목별로 여러 대 배치되는 것과 동일한 구조), 각 인스턴스는 `AllowedAgentType`으로 Atlas 전용/TransportRobot 전용을 구분한다.
+
+**슬롯 배정은 선입선출이 아니라 실행 시 1회 고정(Home) 방식이다.** 레벨 시작 시 `UOutboundDispatchSubsystem::AssignHomeIdleZoneSlots`가 로봇마다 대기실/슬롯을 한 번 정해 `AFactoryAgentBase::HomeIdleZone`/`HomeSlotIndex`에 기록하고, 그 뒤로는 대기실을 드나들 때마다 항상 같은 슬롯으로 돌아간다(경합·검색 없음). 대기실 마커 총합은 항상 레벨의 로봇 수 이상이라고 가정하며(사용자가 직접 배치), 로봇이 슬롯보다 많은 경우는 다루지 않는다.
 
 - 멤버
   - `EAgentType AllowedAgentType` (Atlas 또는 TransportRobot, 두 타입은 서로 다른 존 사용)
-  - `TArray<FTransform> ParkingSlots`
-  - `TMap<int32, TWeakObjectPtr<AFactoryAgentBase>> SlotOccupancy`
+  - `TArray<TObjectPtr<UParkingSlotMarkerComponent>> ParkingMarkers` (7단계 후속 신규 — 원래 `TArray<FTransform> ParkingSlots`였으나, 뷰포트에 기즈모가 안 보이고 기본값이 월드 원점이라 배치를 깜빡하기 쉬운 문제가 `AStorageShelf`의 스테이징 지점과 동일하게 있어 씬 컴포넌트 마커로 교체. `BeginPlay`에서 `GetComponents`로 캐싱)
+  - `TMap<int32, TWeakObjectPtr<AFactoryAgentBase>> SlotOccupancy` (키는 배열 인덱스가 아니라 `UParkingSlotMarkerComponent::SlotIndex` — BP에서 마커를 어떤 순서로 추가·삭제해도 안전하게 매칭. "지금 이 슬롯에 누가 앉아있는가"만 추적하며, 슬롯의 소유권(Home) 자체는 각 로봇 쪽 `HomeIdleZone`/`HomeSlotIndex`가 별도로 보존한다)
   - `float RestDecayIntervalSeconds = 10.f` (UPROPERTY EditAnywhere; 패시브 회복 감쇠 주기. `FTimerManager` 기반 이벤트 콜백이며 엔진 Tick과 무관하다 — 매 프레임이 아니라 이 값(기본 10초)마다 한 번씩만 실행되므로 5~10초 단위로 널널하게 잡아도 성능에 영향 없음)
   - `int32 RestDecayAmountPerInterval = 10` (UPROPERTY EditAnywhere; 주기마다 삭감할 `OperationCount` 수치; 0 하한 클램프)
   - `float FullyRestedThresholdRatio = 0.2f` (UPROPERTY EditAnywhere, 교대 후보로 인정하는 "완전 회복" 기준. `OperationCount <= MaintenanceThreshold * FullyRestedThresholdRatio`인 로봇만 `FindRestedOccupant()`가 반환한다. `IsMaintenanceDue() == false`를 그대로 기준으로 쓰면 임계치 바로 아래에서 교대 투입된 로봇이 한 번의 작업만으로 즉시 재위험 상태가 되는 스래싱이 발생하므로, 히스테리시스 구간을 둔다)
@@ -90,7 +92,8 @@
   - `TArray<TWeakObjectPtr<AFactoryAgentBase>> BatchMaintenanceTargetSet` (NPC 출동 시점에 `SlotOccupancy` 기준으로 고정; 이후 신규 입실 로봇은 포함되지 않음)
   - `TWeakObjectPtr<AFactoryNPCHuman> BatchMaintenanceNPC` (현재 배치 정비를 수행 중인 NPC)
 - 함수
-  - `bool TryReserveSlot(AFactoryAgentBase* Agent, FTransform& OutSlotTransform)`
+  - `bool TryOccupyHomeSlot(AFactoryAgentBase* Agent, int32 SlotIndex, FTransform& OutSlotTransform)` (7단계 후속 — 기존 `TryReserveSlot`(빈 슬롯 검색)을 대체. 검색하지 않고 지정된 `SlotIndex`(호출부가 이미 알고 있는 자신의 Home)의 마커를 그대로 점유한다)
+  - `void AssignHomeSlots(TArray<AFactoryAgentBase*>& InOutRemainingAgents)` (7단계 후속 — `UOutboundDispatchSubsystem::AssignHomeIdleZoneSlots`가 레벨 시작 시 1회 호출. 리스트 맨 앞부터 자신의 `ParkingMarkers` 개수만큼 소비해 각 로봇에 `AFactoryAgentBase::AssignHomeIdleZoneSlot`으로 고정 배정)
   - `void ReleaseSlot(AFactoryAgentBase* Agent)`
   - `bool IsAgentParked(const AFactoryAgentBase* Agent) const`
   - `AFactoryAgentBase* FindRestedOccupant() const` (`OperationCount <= MaintenanceThreshold * FullyRestedThresholdRatio`인 점유 로봇 반환; 교대 로테이션 판단용, 없으면 nullptr)
