@@ -47,6 +47,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Patrol")
 	FTransform OfficeRoomTransform;
 
+	// Docs에 없는 구현값 — 순찰 단독(애니메이션/내비메시) 테스트용으로 BlueprintCallable 노출.
+	UFUNCTION(BlueprintCallable)
 	void StartPatrol();
 	void AssignMaintenance(AFactoryAgentBase* Target, ERepairType RepairType);
 	void ReturnToOfficeRoom();
