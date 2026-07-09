@@ -106,7 +106,9 @@ public:
 	virtual bool IsMaintenanceDue() const override;
 	virtual float GetOperationRatio() const override;
 	virtual void ApplyRestDecay(int32 Amount) override;
+	virtual void ResumeAfterRepair() override;
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
+	virtual void DebugForceBreakdown() override { TriggerBreakdown(); }
 	virtual void OnArrivedAtDestination() override;
 	virtual void OnWorkingTick(float DeltaTime) override;
 	bool IsEligibleForQuickCheck() const;
@@ -120,6 +122,8 @@ public:
 
 private:
 	float ComputeCurrentBreakdownChance() const;
+	// EvaluateRotationOrContinue의 확률 롤 성공 시 / DebugForceBreakdown 강제 호출 시 공용으로 쓰는 실제 고장 처리.
+	void TriggerBreakdown();
 	void AttachHeldItem(ALogisticsItem* Item);
 	void DetachHeldItem();
 
