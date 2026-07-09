@@ -98,6 +98,10 @@ public:
 	// AFactoryNPCHuman::AssignMaintenance처럼 구체 타입을 모르는 코드가 접근할 수 있도록 6단계에 이어 추가.
 	virtual URepairProgressComponent* GetRepairComponent() const { return nullptr; }
 
+	// Docs에 없는 구현값 — 정비 사이클(NPC 접근+수리) 단독 테스트용 디버그 훅.
+	// AtlasRobot/TransportRobot가 기존 EvaluateRotationOrContinue의 고장 처리 블록(TriggerBreakdown)을 그대로 재사용해 override한다.
+	virtual void DebugForceBreakdown() {}
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:

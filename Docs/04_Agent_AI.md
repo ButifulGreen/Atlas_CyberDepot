@@ -79,8 +79,8 @@
 ### `AFactoryNPCHuman` (AFactoryAgentBase)
 - 멤버: `EPatrolState PatrolState`, `float PatrolStartTime`, `float MaxPatrolDurationSeconds`, `AFactoryAgentBase* AssignedMaintenanceTarget`
 - 함수
-  - `void StartPatrol()`
+  - `void StartPatrol()` (7단계 후속 — 순찰 단독(애니메이션/내비메시) 테스트용으로 `UFUNCTION(BlueprintCallable)` 노출. 레벨 블루프린트에서 키 바인딩으로 직접 호출 가능)
   - `void AssignMaintenance(AFactoryAgentBase* Target, ERepairType RepairType)` (`AssignedMaintenanceTarget` 설정과 동시에 `AFactoryAIController::SetAvoidanceIgnoreActor(Target, true)` 호출로 좁은 구간에서도 접근 가능하도록 회피 예외 등록; 정비 종료 시 `false`로 해제)
-  - `void ReturnToOfficeRoom()`
+  - `void ReturnToOfficeRoom()` (7단계 후속 — `URepairProgressComponent::OnRepairCompleted()`가 정비를 마친 뒤 AI 제어 중인 NPC 정비자에게 자동 호출한다. 빙의 중인 플레이어는 대상에서 제외 — 8단계에서 정교화)
   - `bool TryPossessByPlayer(APlayerController* Controller)` (FieldWorker Role 검증은 호출 측 `Server_RequestPossessNPC`에서 수행)
   - `void CallToOfficeExit()`

@@ -62,7 +62,9 @@ public:
 	virtual bool IsMaintenanceDue() const override;
 	virtual float GetOperationRatio() const override;
 	virtual void ApplyRestDecay(int32 Amount) override;
+	virtual void ResumeAfterRepair() override;
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
+	virtual void DebugForceBreakdown() override { TriggerBreakdown(); }
 	virtual void OnBlockedTick(float DeltaTime) override;
 	virtual void OnUnblocked() override;
 	virtual void OnArrivedAtDestination() override;
@@ -85,6 +87,8 @@ protected:
 
 private:
 	float ComputeCurrentBreakdownChance() const;
+	// EvaluateRotationOrContinue의 확률 롤 성공 시 / DebugForceBreakdown 강제 호출 시 공용으로 쓰는 실제 고장 처리.
+	void TriggerBreakdown();
 
 	// 7단계 후속 — EvaluateRotationOrContinue가 자리를 비우기 전 확인하는 "교대 가능한 로봇이 있는가" 체크.
 	bool HasRestedTransportRobotAvailable() const;

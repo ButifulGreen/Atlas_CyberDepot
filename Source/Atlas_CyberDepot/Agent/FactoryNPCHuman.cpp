@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Agent/FactoryNPCHuman.h"
+#include "Atlas_CyberDepot.h"
 #include "Agent/FactoryAIController.h"
 #include "Repair/RepairProgressComponent.h"
 #include "NavigationSystem.h"
@@ -40,6 +41,9 @@ void AFactoryNPCHuman::AssignMaintenance(AFactoryAgentBase* Target, ERepairType 
 
 	AssignedMaintenanceTarget = Target;
 	SetState(EAgentState::UnderRepair);
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] %s: %s를 향해 이동 시작(RepairType=%s)"), *GetName(), *Target->GetName(),
+		RepairType == ERepairType::FullRepair ? TEXT("FullRepair") : TEXT("QuickCheck"));
 
 	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
 	{
