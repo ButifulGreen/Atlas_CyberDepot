@@ -110,7 +110,12 @@ public:
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
 	virtual void DebugForceBreakdown() override { TriggerBreakdown(); }
 	virtual void OnArrivedAtDestination() override;
+	virtual void OnMoveFailedPermanently() override;
 	virtual void OnWorkingTick(float DeltaTime) override;
+	// 안전거리/FinalHop 트레이스가 이번 트립의 짝(배송로봇)을 장애물로 오인해 접근을 멈추지 않도록 제외.
+	virtual AFactoryAgentBase* GetCurrentTripPartner() const override;
+	// 정비 중인 NPC(Broken)가 선반 접근을 막을 때, 대안 칸이 있으면 그리로 재할당(성공 시 true).
+	virtual bool TryHandleFinalHopBrokenBlock(AFactoryAgentBase* BrokenAgent) override;
 	bool IsEligibleForQuickCheck() const;
 	void AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff = false);
 	void EvaluateRotationOrContinue();
@@ -140,9 +145,21 @@ private:
 	// 도착(Working) + 짐 보유 여부(bNeedsPayload)까지 일치해야 반환한다.
 	AFactoryTransportRobot* FindWaitingTransportRobot(const FGuid& TripTaskID, bool bNeedsPayload) const;
 
+	// 버그 수정 — 트레이/선반 핸드오프 지점에서 아틀라스와 배송로봇의 Crowd 회피가 서로를 장애물로 보고
+	// 계속 피하려다 제자리에서 밀고 당겨(이동 실패 Code=1 Blocked) 목적지에 못 붙는 경우가 있었다.
+	// FindWaitingTransportRobot과 달리 도착/짐 보유 여부와 무관하게 같은 트립이면 바로 찾는다(이동 중에도
+	// 미리 상호 무시를 걸어둬야 하므로).
+	AFactoryTransportRobot* FindTransportRobotForTrip(const FGuid& TripTaskID) const;
+	// PendingSlotReservation.TripTaskID 기준으로 위 탐색 + AIController->SetAvoidanceIgnoreActor(true) 호출.
+	void IgnoreTransportRobotForCurrentTrip(class AFactoryAIController* AIController);
+	// 핸드오프가 끝난 뒤 상호 회피를 원복.
+	void ClearTransportRobotIgnore(AFactoryTransportRobot* Robot);
+
 	// IKReachHoldSeconds 경과 후 bIsReachingForItem을 내린다.
 	void ClearIKReachFlag();
 
 	float ZoneRetryTimer = 0.f;
 	FTimerHandle IKReachTimerHandle;
+	// 버그 수정 — StartCurrentAssignment의 존 예약 실패(다른 아틀라스가 점유 중)를 재시도하는 타이머.
+	FTimerHandle StartAssignmentRetryTimerHandle;
 };

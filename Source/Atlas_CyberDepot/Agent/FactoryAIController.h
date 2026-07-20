@@ -31,7 +31,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Congestion")
 	float CongestionSenseRadius = 1500.f;
 
+	// 버그 수정 — 이동 실패 시 아무 복구가 없어 에이전트가 Moving에 영구히 멈추는 문제가 있었다.
+	// Blocked 등 진짜 길찾기 실패에 한해 같은 목적지로 자동 재시도한다(Docs에 없는 구현값).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Movement")
+	int32 MaxMoveRetryAttempts = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Movement")
+	float MoveRetryDelaySeconds = 1.f;
+
 private:
 	// Crowd 회피 그룹 비트 중 정비 접근 시 상호 무시 용도로 예약한 비트
 	static constexpr int32 MaintenanceIgnoreAvoidanceGroup = 1 << 7;
+
+	void RetryLastMove();
+
+	FVector LastRequestedDestination = FVector::ZeroVector;
+	int32 MoveFailureRetryCount = 0;
+	FTimerHandle MoveRetryTimerHandle;
 };

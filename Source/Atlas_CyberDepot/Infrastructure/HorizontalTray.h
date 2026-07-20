@@ -54,13 +54,22 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Work Position")
 	TObjectPtr<USceneComponent> ItemEndMarker;
 
-	// 마커에서 트레이 정면축 한 방향으로 각자의 거리만큼 뗀 위치. 선반과 달리 좌우 구분 없음(부호 반전 없음).
-	// Docs에 없는 구현값 — 레벨 제작 후 실측 조정 필요.
+	// 마커 기준 작업 위치 = 정면축(Forward) 오프셋(Distance) + 좌우축(Right) 오프셋(LateralOffset).
+	// 버그 수정 — 원래 정면축 거리 하나뿐이라 아틀라스/배송로봇이 좌우로 벌어질 방법이 없었다. 둘이
+	// 같은 축 선상에 너무 가깝게 위치하면 내비게이션 충돌 회피가 끼어들어 로봇이 정확한 목표 지점에
+	// 도달하지 못하고(Blocked 재시도) 도착 판정 자체가 간헐적으로 안 나는 문제가 있었다 — 좌우 오프셋으로
+	// 서로 자리를 벌려 물리적 간섭을 줄인다. Docs에 없는 구현값 — 레벨 제작 후 실측 조정 필요.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|WorkPosition")
 	float AtlasWorkDistance = 150.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|WorkPosition")
+	float AtlasWorkLateralOffset = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|WorkPosition")
 	float TransportRobotWorkDistance = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|WorkPosition")
+	float TransportRobotWorkLateralOffset = 0.f;
 
 	FVector GetAtlasWorkLocation() const;
 	FVector GetTransportRobotWorkLocation() const;
@@ -81,7 +90,7 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-	FVector ComputeWorkLocation(float DepthOffset) const;
+	FVector ComputeWorkLocation(float DepthOffset, float LateralOffset) const;
 
 	// Docs에 없는 구현값: 컨베이어 이동 속도
 	UPROPERTY(EditAnywhere)

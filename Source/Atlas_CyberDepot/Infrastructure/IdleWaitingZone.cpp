@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Infrastructure/IdleWaitingZone.h"
+#include "Atlas_CyberDepot.h"
 #include "Agent/FactoryAgentBase.h"
 #include "Agent/FactoryNPCHuman.h"
 #include "Assignment/SmartFactoryManager.h"
@@ -25,38 +26,37 @@ void AIdleWaitingZone::BeginPlay()
 	}
 }
 
-bool AIdleWaitingZone::TryOccupyHomeSlot(AFactoryAgentBase* Agent, int32 SlotIndex, FTransform& OutSlotTransform)
+bool AIdleWaitingZone::GetHomeSlotTransform(int32 SlotIndex, FTransform& OutSlotTransform) const
 {
-	if (!Agent)
-	{
-		return false;
-	}
-
-	const UParkingSlotMarkerComponent* TargetMarker = nullptr;
 	for (const UParkingSlotMarkerComponent* Marker : ParkingMarkers)
 	{
 		if (Marker && Marker->SlotIndex == SlotIndex)
 		{
-			TargetMarker = Marker;
-			break;
+			OutSlotTransform = Marker->GetComponentTransform();
+			return true;
 		}
 	}
 
-	if (!TargetMarker)
+	return false;
+}
+
+void AIdleWaitingZone::MarkSlotOccupied(AFactoryAgentBase* Agent, int32 SlotIndex)
+{
+	if (!Agent)
 	{
-		return false;
+		return;
 	}
 
 	SlotOccupancy.Add(SlotIndex, Agent);
-	OutSlotTransform = TargetMarker->GetComponentTransform();
 	Agent->bIsParkedInIdleZone = true;
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[RestDecay] %s: %s 파킹(슬롯 %d, OperationRatio=%.2f)"),
+		*GetName(), *Agent->GetName(), SlotIndex, Agent->GetOperationRatio());
 
 	if (AMSmartFactoryManager* Manager = GetWorld() ? GetWorld()->GetGameState<AMSmartFactoryManager>() : nullptr)
 	{
 		Manager->OnAgentBecameIdle(Agent);
 	}
-
-	return true;
 }
 
 void AIdleWaitingZone::AssignHomeSlots(TArray<AFactoryAgentBase*>& InOutRemainingAgents)
@@ -130,8 +130,6 @@ void AIdleWaitingZone::OnRestDecayInterval()
 			Agent->ApplyRestDecay(RestDecayAmountPerInterval);
 		}
 	}
-
-	OnBatchMaintenanceProgress();
 
 	if (ShouldDispatchNPCForMaintenance())
 	{

@@ -68,6 +68,18 @@ public:
 	virtual void OnBlockedTick(float DeltaTime) override;
 	virtual void OnUnblocked() override;
 	virtual void OnArrivedAtDestination() override;
+	virtual void OnMoveFailedPermanently() override;
+	// 안전거리/FinalHop 트레이스가 이번 트립의 짝(아틀라스)을 장애물로 오인해 접근을 멈추지 않도록 제외.
+	virtual AFactoryAgentBase* GetCurrentTripPartner() const override;
+	// 버그 수정(사용자 지시, Waitbound) — 선반 마커는 깊이축으로만 떨어져 있어(Lateral 오프셋 없음)
+	// 배송로봇 마커가 아틀라스 마커보다 항상 선반에서 더 멀다 — 배송로봇이 먼저 도착해 정지하면 뒤따르는
+	// 아틀라스가 물리적으로 가로막힌다. Waitbound에서 짝 아틀라스가 먼저 도착(Working)했는지 확인한 뒤에만
+	// 마커로 진입한다.
+	virtual bool CanProceedFromWaitbound() const override;
+	// 짝 아틀라스가 정비 중인 NPC 때문에 다른 선반칸으로 재할당됐을 때 같이 갱신한다(같은 트립이니
+	// 물리적으로 같은 칸에서 만나야 핸드오프가 성립한다). 이미 그 칸으로 이동/도착해 있었다면 새 칸으로
+	// 다시 이동시킨다.
+	void RetargetCurrentTaskSlot(int32 NewFloorIndex, int32 NewSlotIndex);
 	bool IsEligibleForQuickCheck() const;
 	void AcceptTransportTask(const FTransportTask& Task);
 	void EvaluateRotationOrContinue();
@@ -96,6 +108,11 @@ private:
 	// PickupPoint/DropoffPoint가 Tray면 GetTransportRobotWorkLocation(), Shelf면 방향에 맞는
 	// 스테이징 트랜스폼 위치를 반환한다(선반은 슬롯 개념이 없는 로봇 대기 지점 1곳뿐).
 	FVector GetTaskPointLocation(AActor* PointActor, bool bIsPickupSide) const;
+
+	// 버그 수정 — 같은 트립을 담당하는 아틀라스를 찾아 Crowd 상호 회피를 미리 꺼둔다(핸드오프 지점에서
+	// 서로를 피하려다 밀고 당기며 이동 실패하는 문제, FactoryAtlasRobot의 대응 함수와 짝). 해제는
+	// 아틀라스 쪽에서 TransferItem 성공 시 처리한다(SetAvoidanceIgnoreActor가 양쪽을 동시에 되돌림).
+	class AFactoryAtlasRobot* FindAtlasForTrip(const FGuid& TripTaskID) const;
 
 	// OnBlockedTick 진입 엣지(1회)에서만 OnEnterBlockedState()를 호출하기 위한 플래그.
 	bool bHasRegisteredBlocker = false;

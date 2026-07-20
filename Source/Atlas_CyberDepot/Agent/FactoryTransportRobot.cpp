@@ -3,11 +3,13 @@
 #include "Agent/FactoryTransportRobot.h"
 #include "Atlas_CyberDepot.h"
 #include "Agent/FactoryAIController.h"
+#include "Agent/FactoryAtlasRobot.h"
 #include "Infrastructure/LogisticsItem.h"
 #include "Infrastructure/StorageShelf.h"
 #include "Infrastructure/HorizontalTray.h"
 #include "Infrastructure/IdleWaitingZone.h"
 #include "Navigation/CostZoneVolume.h"
+#include "Navigation/FactoryNavWaypoint.h"
 #include "Assignment/OutboundDispatchSubsystem.h"
 #include "Assignment/SmartFactoryManager.h"
 #include "Repair/RepairProgressComponent.h"
@@ -64,8 +66,6 @@ void AFactoryTransportRobot::ApplyRestDecay(int32 Amount)
 
 void AFactoryTransportRobot::ResumeAfterRepair()
 {
-	Super::ResumeAfterRepair();
-
 	// 고장 직전 진행 중이던 트립이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로 CurrentTask가
 	// 유효하다) 새 작업을 끼워넣지 않는다 — 그 경우의 "이어서 재개"는 이번 스코프 밖. 트립이 없던 상태
 	// (디버그 강제 고장 등)에서 복구됐을 때만 유휴 스윕으로 대기 중인 트립을 받는다.
@@ -73,6 +73,8 @@ void AFactoryTransportRobot::ResumeAfterRepair()
 	{
 		return;
 	}
+
+	Super::ResumeAfterRepair();
 
 	if (UWorld* World = GetWorld())
 	{
@@ -103,6 +105,10 @@ float AFactoryTransportRobot::ComputeCurrentBreakdownChance() const
 void AFactoryTransportRobot::AcceptTransportTask(const FTransportTask& Task)
 {
 	LeaveIdleZoneIfParked();
+	// 버그 수정 — 웨이포인트 그래프로 이동하던 도중(대기실行 등) 새 트립이 끼어들면, 그때 쥐고 있던 노드
+	// 예약을 반납할 기회 없이 바로 넘어가 그 노드가 영구 점유 상태로 남았다
+	// (FactoryAgentBase::AbandonAnyActiveWaypointRoute 주석 참고).
+	AbandonAnyActiveWaypointRoute();
 
 	CurrentTask = Task;
 
@@ -181,6 +187,11 @@ void AFactoryTransportRobot::OnItemCollectedByAtlas()
 
 void AFactoryTransportRobot::OnArrivedAtDestination()
 {
+	if (TryHandleWaypointRouteArrival())
+	{
+		return;
+	}
+
 	if (TryHandleIdleZoneArrival())
 	{
 		return;
@@ -189,6 +200,70 @@ void AFactoryTransportRobot::OnArrivedAtDestination()
 	// 도착 후 스스로 트레이/선반을 건드리지 않고 파킹 — 아틀라스가 TransferItem으로 다가와야 다음 단계로 넘어간다.
 	SetState(EAgentState::Working);
 	EvaluateRotationOrContinue();
+}
+
+void AFactoryTransportRobot::OnMoveFailedPermanently()
+{
+	Super::OnMoveFailedPermanently();
+
+	if (!CurrentTask.IsValid())
+	{
+		// 대기실 이동 등 CurrentTask와 무관한 이동 실패 — 정리할 트립이 없다.
+		SetState(EAgentState::Idle);
+		return;
+	}
+
+	// 버그 수정 — 목적지가 근본적으로 도달 불가능하면(레벨 지오메트리 등) 로봇이 CurrentTask를 영원히
+	// 붙든 채 Moving에 멈춰 함대에서 영구 이탈했다. 트레이 존을 반납하고 Idle로 복귀시켜 최소한 이 로봇
+	// 자체는 다른 작업을 계속 받게 한다.
+	ReleaseReservedTrayZone();
+
+	// 버그 수정(사용자 지시, 근본 원인인 회피 국소최소 문제와 별개로 우선 반영) — 아직 짐을 안 실은
+	// 상태(픽업 이동 중 실패)라면 트립을 통째로 재큐잉해도 안전하다(TaskID 유지 — 아틀라스 쪽
+	// ReservedSlots의 TripTaskID와 이 값으로 짝지어지므로 바뀌면 그 아틀라스는 영영 못 찾는다).
+	// 짐을 이미 실은 상태(배달 이동 중 실패)는 픽업 지점부터 다시 도는 재큐잉이 물품을 중복 생성한다
+	// (원본은 허공에 분리된 채 남고, 새 로봇이 같은 슬롯에서 또 하나를 집어옴) — 이 경우는 기존처럼
+	// 자동 재큐잉하지 않고 레벨 점검이 필요함을 크게 남긴다.
+	if (PayloadItem)
+	{
+		UE_LOG(LogFactoryDispatch, Error, TEXT("[%s] 목적지 도달 불가로 트립(%s)을 포기 — 짐을 실은 채 실패해 재큐잉하지 않음(중복 생성 방지). 물품/레벨 NavMesh 수동 점검 필요"),
+			*GetName(), *CurrentTask.TaskID.ToString());
+
+		// 짐을 든 채로 포기하면 물품이 허공에 남는다 — 최소한 부착만 풀어 시야에서 정리한다.
+		PayloadItem->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+		PayloadItem = nullptr;
+		CurrentTask = FTransportTask();
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Error, TEXT("[%s] 목적지 도달 불가로 트립(%s)을 포기 — 아직 미적재라 재큐잉함"),
+			*GetName(), *CurrentTask.TaskID.ToString());
+
+		const FTransportTask FailedTask = CurrentTask;
+		CurrentTask = FTransportTask();
+
+		if (UWorld* World = GetWorld())
+		{
+			if (UOutboundDispatchSubsystem* Dispatch = World->GetSubsystem<UOutboundDispatchSubsystem>())
+			{
+				Dispatch->RequeueTransportTask(FailedTask);
+			}
+		}
+	}
+
+	SetState(EAgentState::Idle);
+
+	// 버그 수정 — 방금 재큐잉한 트립을 이 스윕이 같은(방금 실패한) 로봇에게 그 자리에서 다시 쥐어줄 수
+	// 있다. 동기 호출 그대로 두면 같은 콜스택 안에서 이동 실패→OnMoveFailedPermanently 재귀로 이어질
+	// 위험이 있다(아틀라스 쪽에서 실제 재현된 스택 오버플로우와 동일한 구조). EnqueueInboundWork와
+	// 동일하게 다음 틱으로 미룬다.
+	if (UWorld* World = GetWorld())
+	{
+		if (UOutboundDispatchSubsystem* Dispatch = World->GetSubsystem<UOutboundDispatchSubsystem>())
+		{
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateUObject(Dispatch, &UOutboundDispatchSubsystem::TryDispatchIdleAgents));
+		}
+	}
 }
 
 FVector AFactoryTransportRobot::GetTaskPointLocation(AActor* PointActor, bool bIsPickupSide) const
@@ -207,6 +282,84 @@ FVector AFactoryTransportRobot::GetTaskPointLocation(AActor* PointActor, bool bI
 	}
 
 	return PointActor ? PointActor->GetActorLocation() : FVector::ZeroVector;
+}
+
+AFactoryAtlasRobot* AFactoryTransportRobot::FindAtlasForTrip(const FGuid& TripTaskID) const
+{
+	if (!TripTaskID.IsValid())
+	{
+		return nullptr;
+	}
+
+	TArray<AActor*> FoundAtlases;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AFactoryAtlasRobot::StaticClass(), FoundAtlases);
+	for (AActor* Actor : FoundAtlases)
+	{
+		AFactoryAtlasRobot* Atlas = Cast<AFactoryAtlasRobot>(Actor);
+		if (Atlas && Atlas->PendingSlotReservation.bIsValid && Atlas->PendingSlotReservation.TripTaskID == TripTaskID)
+		{
+			return Atlas;
+		}
+	}
+
+	return nullptr;
+}
+
+AFactoryAgentBase* AFactoryTransportRobot::GetCurrentTripPartner() const
+{
+	if (!CurrentTask.IsValid())
+	{
+		return nullptr;
+	}
+	return FindAtlasForTrip(CurrentTask.TaskID);
+}
+
+bool AFactoryTransportRobot::CanProceedFromWaitbound() const
+{
+	AFactoryAgentBase* Partner = GetCurrentTripPartner();
+	return Partner && Partner->CurrentState == EAgentState::Working;
+}
+
+void AFactoryTransportRobot::RetargetCurrentTaskSlot(int32 NewFloorIndex, int32 NewSlotIndex)
+{
+	if (!CurrentTask.IsValid())
+	{
+		return;
+	}
+
+	CurrentTask.FloorIndex = NewFloorIndex;
+	CurrentTask.SlotIndex = NewSlotIndex;
+
+	// 이 트립의 선반 다리(Inbound=Dropoff, Outbound=Pickup)를 이미 향하고 있었는지 확인 — 짐을 실은
+	// 뒤(Inbound 드롭오프 단계)이거나 애초에 선반이 픽업 지점(Outbound)인 경우만 지금 이 좌표를 실제로
+	// 쓰는 중이다. 아직 트레이 쪽(픽업 대기 등)이면 저장된 값만 갱신해두면 나중에 자동으로 새 값을 쓴다.
+	if (CurrentState != EAgentState::Moving && CurrentState != EAgentState::Pause && CurrentState != EAgentState::Working)
+	{
+		return;
+	}
+
+	AStorageShelf* Shelf = Cast<AStorageShelf>(CurrentTask.DropoffPoint.Get());
+	bool bHeadingToShelf = Shelf && (PayloadItem != nullptr);
+	bool bIsPickupSide = false;
+	if (!Shelf)
+	{
+		Shelf = Cast<AStorageShelf>(CurrentTask.PickupPoint.Get());
+		bHeadingToShelf = (Shelf != nullptr) && (PayloadItem == nullptr);
+		bIsPickupSide = true;
+	}
+
+	if (!bHeadingToShelf)
+	{
+		return;
+	}
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] 짝 아틀라스의 선반칸 재할당에 맞춰 (Floor=%d,Slot=%d)로 재이동"),
+		*GetName(), NewFloorIndex, NewSlotIndex);
+	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+	{
+		SetState(EAgentState::Moving);
+		AIController->RequestMoveWithFilter(GetTaskPointLocation(Shelf, bIsPickupSide));
+	}
 }
 
 void AFactoryTransportRobot::TriggerBreakdown()
@@ -248,7 +401,15 @@ void AFactoryTransportRobot::EvaluateRotationOrContinue()
 		return;
 	}
 
-	if (!IsMaintenanceDue() || PayloadItem)
+	// 버그 수정 — 원래 PayloadItem(짐을 들고 있는지)만 봤는데, 이 함수는 도착 직후(OnArrivedAtDestination)
+	// 마다 호출된다. 트레이/선반 "픽업" 지점에 막 도착해 아틀라스의 핸드오프를 기다리는 순간은 아직
+	// PayloadItem이 없어(안 받았으니까) 이 조건을 그대로 통과해버렸다 — 정비 로테이션이 이 순간을
+	// "낀 트립이 없는 안전한 순간"으로 오판해 대기실로 보내버려, CurrentTask는 그대로 남은 채 로봇만
+	// 떠나 아틀라스가 영원히 배송로봇을 못 찾는 상태가 됐다(대기열 기능으로 로봇의 트립 회전이 빨라지면서
+	// 이 타이밍에 맞아떨어질 확률이 크게 올라가 자주 재현됨). 아틀라스(HandoffStationAssignment로 배정
+	// 자체를 다른 로봇에게 넘김)와 달리 배송로봇 쪽엔 대응하는 인계 로직이 없으므로, 진행 중인
+	// CurrentTask가 있으면(짐 보유 여부와 무관하게) 아예 로테이션을 고려하지 않는다.
+	if (!IsMaintenanceDue() || CurrentTask.IsValid())
 	{
 		return;
 	}

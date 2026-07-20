@@ -58,6 +58,14 @@ public:
 	void OnHandoffAtlasArrivedAtStagingPoint(const FGuid& AssignmentID);
 	void OnStationAssignmentCompleted(const FGuid& AssignmentID);
 
+	// 버그 수정(사용자 지시, 근본 원인인 회피 국소최소 문제와 별개로 우선 반영) — OnMoveFailedPermanently는
+	// 재큐잉하지 않는 게 원래 의도였지만, 회피가 막힌 지점에서 배정이 조용히 죽어 사이클 전체가 멈추는
+	// 빈도가 테스트를 막을 정도로 잦아졌다. 실패한 배정을 새 AssignmentID로 다시 큐에 넣어 다른 아틀라스가
+	// 이어받게 한다 — 같은 지점이 계속 막히면 다음 아틀라스도 반복해서 실패할 수 있다는 트레이드오프는 감수.
+	void RequeueStationAssignment(FStationAssignment Assignment);
+	// TaskID는 유지 — 이 값으로 아틀라스 쪽 ReservedSlots(TripTaskID)와 짝지어지므로 바뀌면 영구 미아가 된다.
+	void RequeueTransportTask(const FTransportTask& Task);
+
 	// 문서는 TaskID만 받지만, 이벤트에 실을 ActorID/ActorType을 얻으려면 호출자(로봇)가 필요해 매개변수로 추가
 	void OnTransportTaskCompleted(const FGuid& TaskID, AFactoryTransportRobot* Robot);
 

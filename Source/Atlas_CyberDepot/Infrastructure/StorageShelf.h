@@ -71,7 +71,7 @@ class UOutboundStagingMarkerComponent : public USceneComponent
 
 // Docs/06_Infrastructure.md §6 — 4단계 대상. 기차형 좌/우 분리 구조, 3층×9칸 고정.
 // 좌/우 구역 예약 함수는 문서상 AFactoryAtlasRobot*이지만 그 클래스가 5단계에 있어
-// 지금은 멤버(InboundZoneOccupant 등)와 동일한 AFactoryAgentBase*로 받는다.
+// 지금은 멤버(InboundZoneOccupants 등)와 동일한 AFactoryAgentBase*로 받는다.
 UCLASS()
 class AStorageShelf : public AActor
 {
@@ -89,11 +89,23 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	TArray<FShelfSlot> Slots;
 
-	UPROPERTY(Replicated, BlueprintReadOnly)
-	TWeakObjectPtr<AFactoryAgentBase> InboundZoneOccupant;
+	// Docs/00_DesignPrinciples.md 스펙 이탈(승인됨) — 원래 "좌/우 구역 아틀라스 1대 고정"이었으나,
+	// 에디터에서 조정 가능한 동시 진입 수로 확장. 1로 두면 기존 동작과 동일.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|WorkZone")
+	int32 MaxConcurrentAtlas = 4;
 
-	UPROPERTY(Replicated, BlueprintReadOnly)
-	TWeakObjectPtr<AFactoryAgentBase> OutboundZoneOccupant;
+	// TArray<TWeakObjectPtr<T>>는 UHT가 블루프린트 노출을 지원하지 않아 BlueprintReadOnly 제외.
+	UPROPERTY(Replicated)
+	TArray<TWeakObjectPtr<AFactoryAgentBase>> InboundZoneOccupants;
+
+	UPROPERTY(Replicated)
+	TArray<TWeakObjectPtr<AFactoryAgentBase>> OutboundZoneOccupants;
+
+	// 버그 수정 — 배송로봇/아틀라스 전용 고정 도킹 웨이포인트(슬롯·존마다 사람이 미리 지정)를 예전엔 여기
+	// 뒀었다. 슬롯 27개 중 일부만 배선되면 나머지가 조용히 직행하는 등 근본적으로 취약해서 제거했다 —
+	// 이제 AFactoryAgentBase::TryRequestWaypointRoute(nullptr, 마커좌표)가 목표 마커에 가장 가깝고
+	// 실제로 도달 가능한 웨이포인트를 매번 동적으로 찾는다(Docs/08_Navigation.md §8-B).
+	bool IsZoneFull(EWorkZoneType ZoneType) const;
 
 	// 배송로봇↔아틀라스 핸드오프 지점. 마커를 못 찾으면 선반 자신의 위치로 대체.
 	FVector GetInboundStagingLocation() const;
@@ -115,14 +127,20 @@ public:
 	FVector GetTransportRobotWorkLocation(int32 FloorIndex, int32 SlotIndex, EWorkZoneType ZoneType) const;
 
 	bool TryReserveInboundZone(AFactoryAgentBase* Atlas);
-	void ReleaseInboundZone();
+	// 버그 수정 — 동시 다수 점유(MaxConcurrentAtlas)로 바뀌면서 "누가" 반납하는지가 필요해져 인자 추가.
+	void ReleaseInboundZone(AFactoryAgentBase* Atlas);
 	bool TryReserveOutboundZone(AFactoryAgentBase* Atlas);
-	void ReleaseOutboundZone();
+	void ReleaseOutboundZone(AFactoryAgentBase* Atlas);
 
 	bool TryReserveEmptySlot(int32& OutFloorIndex, int32& OutSlotIndex);
 	bool TryReserveOldestOccupiedSlot(int32& OutFloorIndex, int32& OutSlotIndex, ALogisticsItem*& OutItem);
 	void ConfirmInbound(int32 FloorIndex, int32 SlotIndex, ALogisticsItem* Item);
 	void ConfirmOutboundRemoved(int32 FloorIndex, int32 SlotIndex);
+	// 버그 수정(회피 재설계, 선반칸 재할당용) — ConfirmInbound/ConfirmOutboundRemoved는 항상 확정(물품
+	// 실제 이동)까지 같이 하는데, 정비 중인 NPC가 접근을 막아 다른 칸으로 옮겨갈 때는 확정 없이 예약만
+	// 취소해야 한다. 반드시 대체 칸을 먼저 확보한 뒤에만 호출할 것 — 반납부터 하면 그 사이 다른 입고
+	// 작업이 이 칸을 채갈 수 있다.
+	void ReleaseSlotReservation(int32 FloorIndex, int32 SlotIndex, bool bWasInbound);
 
 	// 6단계 신규 — 슬롯 예약(ReserveNextSlot)과 실제 인출(TransferItem)이 시점상 분리되면서,
 	// 예약 시점에 받았던 아이템 포인터를 나중에 다시 조회할 수 있어야 해서 추가.

@@ -43,7 +43,12 @@ enum class EAgentState : uint8
 	Idle,
 	Working,
 	UnderRepair,
-	Broken
+	Broken,
+	// 버그 수정(사용자 지시, 회피 재설계) — 안전거리/FinalHop 트레이스가 정지시킨 "대기+재확인" 상태.
+	// 기존엔 bYieldingForSafety라는 bool을 Moving 위에 얹어 표현했는데, 그러면 Moving이 "이동 의도"와
+	// "실제 이동 중"을 동시에 뜻해 데이터 가치가 떨어졌다. 끝에 추가 — 리플리케이트되는 값이라 기존
+	// 값 순서를 바꾸지 않는다.
+	Pause
 };
 
 // Docs/01_EventBus_DataPipeline.md §1
