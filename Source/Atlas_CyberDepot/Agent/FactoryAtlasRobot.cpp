@@ -282,6 +282,24 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 		{
 			AttachHeldItem(Item);
 			SourceTray->OnItemCleared();
+
+			// 버그 수정(대기열 신설) — Quantity>1 입고 주문의 나머지가 대기열에 있으면, 입고 트레이가
+			// 빈 직후(=지금) 바로 이어서 흘려보낸다.
+			if (SourceTray->Direction == ETrayDirection::Inbound)
+			{
+				if (UInventoryOrderSubsystem* InventoryOrders = GetWorld()->GetSubsystem<UInventoryOrderSubsystem>())
+				{
+					UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] Inbound 트레이(%s) 비움 — %s 대기열 확인 트리거"),
+						*GetName(), *SourceTray->GetName(), *UEnum::GetValueAsString(SourceTray->BoundItemType));
+					InventoryOrders->OnInboundTrayCleared(SourceTray->BoundItemType);
+				}
+				else
+				{
+					UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Inbound 트레이(%s) 비움 — UInventoryOrderSubsystem을 못 찾아 대기열 확인 스킵"),
+						*GetName(), *SourceTray->GetName());
+				}
+			}
+
 			return true;
 		}
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Tray->) 실패 — %s에 CurrentItem이 없음"), *GetName(), *SourceTray->GetName());
