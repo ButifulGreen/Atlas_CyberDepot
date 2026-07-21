@@ -29,6 +29,7 @@
 - (10단계 신규) `UReplayPlaybackSubsystem`이 방출하는 `FOnPlaybackFrame` 델리게이트를 실제 화면에 어떻게 시각화(고스트 액터 스폰 등)할지는 미정 — 소비자 측 설계가 필요하다.
 - (5단계 후속 신규) `UInventoryOrderSubsystem::TryPlaceOrder`가 Inbound 트레이에 물품을 올릴 때, 트레이가 이미 점유 중이면 이번 호출에서는 물리적으로 안 올리고 넘어간다 — `Quantity`가 1보다 큰 주문의 나머지 수량을 트레이가 빌 때마다 이어서 자동으로 흘려보내는 대기열이 없다. 배정/디스패치 로직이 정교화될 때 함께 채울 것.
 - ~~(7단계 후속 신규) 자연 발생 고장에서 복구된 로봇은 `SetState(Idle)`만 될 뿐, 보존된 배정/트립을 실제로 이어서 재개하는 로직이 없다.~~ → 실기 테스트로 확인된 연쇄 정지(적재 선반에서 아틀라스 고장 시 대기 중인 배송로봇도 영구 정지, 그 배송로봇은 어떤 디스패치 트리거로도 재개 불가)를 계기로 해소: `AFactoryAtlasRobot`/`AFactoryTransportRobot::ResumeAfterRepair()`가 `CurrentAssignment`/`CurrentTask`가 유효하면 `Idle` 대신 `Working`으로 복귀시킨다. 아틀라스는 기존 `OnWorkingTick`의 `ZoneRetryIntervalSeconds` 재시도 루프(`ContinueShelfAssignment`/`ContinueTrayAssignment`, 원래부터 재진입 안전하게 설계됨)가 자동으로 이어받고, 배송로봇은 능동 재시도가 없어도 `Working`으로만 돌아가면 아틀라스 쪽 `FindWaitingTransportRobot`(`CurrentState==Working` 요구)이 다시 찾아낸다.
+- (회피 시스템 재설계 논의 중 신규) `ACostZoneVolume`/`AFactoryAIController::ApplyDynamicCongestionCost`(동적 혼잡 코스트) — 삭제 후보. 코스트 오버라이드가 우리 웨이포인트 그래프가 아니라 엔진 NavMesh 이동(`MoveTo`)의 NavArea 클래스 전체에 적용되는 방식이라, 짧고 대안 경로가 거의 없는 웨이포인트 홉/FinalHop 구간에서는 실효가 미미하다. 아틀라스는 애초에 이 시스템을 쓰지 않는다(`AFactoryTransportRobot`만 `OnBlockedTick`/`OnUnblocked`를 오버라이드). 자유이동 구간을 최소화하는 방향(회피 재설계)과 태생적으로 맞지 않음 — 지금 당장 제거하지 않고, 재설계 완료 후 재검토.
 
 ## 검토 후 미채택 사항 (근거 포함)
 
