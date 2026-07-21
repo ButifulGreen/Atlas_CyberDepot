@@ -39,6 +39,10 @@ void AFactoryNPCHuman::AssignMaintenance(AFactoryAgentBase* Target, ERepairType 
 		return;
 	}
 
+	// 버그 수정(사용자 지시) — 사무실에서 랜덤 대기 중(OfficeWaitTimerHandle)에 새 정비가 배정되면,
+	// 대기 종료 후 StartPatrol()이 뒤늦게 불려 지금 진행 중인 정비를 무시하고 순찰로 튀어버릴 수 있다.
+	GetWorldTimerManager().ClearTimer(OfficeWaitTimerHandle);
+
 	AssignedMaintenanceTarget = Target;
 	SetState(EAgentState::UnderRepair);
 
@@ -84,6 +88,32 @@ void AFactoryNPCHuman::ReturnToOfficeRoom()
 	}
 
 	SetState(EAgentState::Moving);
+}
+
+void AFactoryNPCHuman::OnArrivedAtDestination()
+{
+	// 버그 수정(사용자 지시) — 기본 구현(AFactoryAgentBase::OnArrivedAtDestination, 빈 함수)이라 사무실
+	// 도착이 감지되지 않아 CurrentState/PatrolState가 Moving/ReturningToOffice에 영구히 눌러붙었다.
+	// 순찰 중 도착(PatrolState==Patrolling)이나 정비 대상 도착(AssignMaintenance가 이동 시작 시점에
+	// 이미 UnderRepair로 전환해둠)은 여기서 다룰 대상이 아니다 — 사무실 복귀 도착만 처리한다.
+	if (PatrolState != EPatrolState::ReturningToOffice)
+	{
+		return;
+	}
+
+	PatrolState = EPatrolState::InOffice;
+	SetState(EAgentState::Idle);
+
+	const int32 WaitSeconds = FMath::RandRange(0, MaxOfficeWaitSeconds);
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Patrol] %s 사무실 도착 — %d초 대기 후 순찰 재개"), *GetName(), WaitSeconds);
+
+	if (WaitSeconds <= 0)
+	{
+		StartPatrol();
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(OfficeWaitTimerHandle, this, &AFactoryNPCHuman::StartPatrol, static_cast<float>(WaitSeconds), false);
 }
 
 bool AFactoryNPCHuman::TryPossessByPlayer(APlayerController* RequestingController)
