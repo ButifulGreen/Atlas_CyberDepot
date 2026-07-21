@@ -2,7 +2,9 @@
 
 #include "Infrastructure/HorizontalTray.h"
 #include "Infrastructure/LogisticsItem.h"
+#include "Infrastructure/LogisticsItemSpawner.h"
 #include "Agent/FactoryAgentBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 
 AHorizontalTray::AHorizontalTray()
@@ -133,6 +135,27 @@ void AHorizontalTray::TickConveyance(float DeltaTime)
 void AHorizontalTray::OnItemReachedEnd()
 {
 	bIsHaltedAtEnd = true;
+
+	// 버그 수정 — ALogisticsItemSpawner::ReturnItem이 만들어져 있었지만 어디서도 호출되지 않아, Outbound
+	// 트레이 종점에 도착한 물품이 영원히 남고(회수 로직 없음) 풀도 계속 줄어들다 결국 TryAcquireItem이
+	// 실패하기 시작했다. 실차량 연동 전까지는 여기서 즉시 풀로 반납해 "출고 완료(차량이 수거)"로 취급한다.
+	if (Direction == ETrayDirection::Outbound && CurrentItem.IsValid())
+	{
+		ALogisticsItem* Item = CurrentItem.Get();
+
+		TArray<AActor*> FoundSpawners;
+		UGameplayStatics::GetAllActorsOfClass(GetWorld(), ALogisticsItemSpawner::StaticClass(), FoundSpawners);
+		for (AActor* Actor : FoundSpawners)
+		{
+			if (ALogisticsItemSpawner* Spawner = Cast<ALogisticsItemSpawner>(Actor))
+			{
+				Spawner->ReturnItem(Item);
+				break;
+			}
+		}
+
+		OnItemCleared();
+	}
 }
 
 void AHorizontalTray::OnItemCleared()
