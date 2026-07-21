@@ -66,11 +66,14 @@ void AFactoryTransportRobot::ApplyRestDecay(int32 Amount)
 
 void AFactoryTransportRobot::ResumeAfterRepair()
 {
-	// 고장 직전 진행 중이던 트립이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로 CurrentTask가
-	// 유효하다) 새 작업을 끼워넣지 않는다 — 그 경우의 "이어서 재개"는 이번 스코프 밖. 트립이 없던 상태
-	// (디버그 강제 고장 등)에서 복구됐을 때만 유휴 스윕으로 대기 중인 트립을 받는다.
+	// 버그 수정 — 고장 직전 진행 중이던 트립이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로
+	// CurrentTask가 유효하다) Idle로 내리지 않고 Working으로 복귀시킨다. 이 로봇은 능동 재시도 루프가
+	// 없고 그냥 Working 상태로 파킹해 아틀라스의 TransferItem을 기다리는 구조라(OnArrivedAtDestination
+	// 주석 참고), Working으로만 돌아가면 아틀라스 쪽 FindWaitingTransportRobot(CurrentState==Working
+	// 요구)이 다시 찾아낸다. 원래는 Idle로 빠져 서로 영영 못 찾았다.
 	if (CurrentTask.IsValid())
 	{
+		SetState(EAgentState::Working);
 		return;
 	}
 
@@ -584,7 +587,7 @@ void AFactoryTransportRobot::OnUnblocked()
 void AFactoryTransportRobot::OnTaskCompleted()
 {
 	SetState(EAgentState::Idle);
-	++OperationCount;
+	OperationCount += OperationCountPerTask;
 
 	const FGuid CompletedTaskID = CurrentTask.TaskID;
 	UOutboundDispatchSubsystem* Dispatch = GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>();

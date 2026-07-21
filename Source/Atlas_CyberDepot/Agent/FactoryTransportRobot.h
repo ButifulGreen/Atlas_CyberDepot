@@ -40,6 +40,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Maintenance")
 	int32 MaintenanceThreshold = 20;
 
+	// Docs에 없는 구현값 — OnTaskCompleted 1회당 OperationCount 증가량(원래 매직넘버 1로 하드코딩돼 있었음).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Maintenance")
+	int32 OperationCountPerTask = 20;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Breakdown")
 	float BreakdownChanceBase = 0.05f;
 
@@ -68,6 +72,7 @@ public:
 
 	virtual bool IsMaintenanceDue() const override;
 	virtual float GetOperationRatio() const override;
+	virtual int32 GetOperationCount() const override { return OperationCount; }
 	virtual void ApplyRestDecay(int32 Amount) override;
 	virtual void ResumeAfterRepair() override;
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }

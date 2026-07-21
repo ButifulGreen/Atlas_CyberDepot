@@ -88,6 +88,12 @@ void AFactoryAgentBase::BeginPlay()
 		AgentID = FGuid::NewGuid();
 	}
 
+	// Docs에 없는 구현값 — 정비 임계치 테스트용. GetRepairComponent()가 있는(=Atlas/TransportRobot) 에이전트만 표시.
+	if (GetRepairComponent())
+	{
+		GetWorldTimerManager().SetTimer(DebugOperationCountTimerHandle, this, &AFactoryAgentBase::DrawDebugOperationCountLabel, 1.f, true);
+	}
+
 	// Docs/08_Navigation.md — 안전거리 감지도 GetRepairComponent()가 있는(=Atlas/TransportRobot)
 	// 에이전트만 대상(NPC는 스코프 밖, 기존 Detour Crowd 그대로 유지). 서버 권한에서만 판정한다.
 	if (HasAuthority() && GetRepairComponent())
@@ -95,6 +101,17 @@ void AFactoryAgentBase::BeginPlay()
 		GetComponents<USafetyTraceMarkerComponent>(SafetyTraceMarkers);
 		GetWorldTimerManager().SetTimer(SafetyTraceTimerHandle, this, &AFactoryAgentBase::RunSafetyTraceCheck, SafetyTraceIntervalSeconds, true);
 	}
+}
+
+void AFactoryAgentBase::DrawDebugOperationCountLabel()
+{
+	if (!GetCapsuleComponent())
+	{
+		return;
+	}
+
+	const FVector Location = GetCapsuleComponent()->GetComponentLocation() + FVector(0.f, 0.f, 80.f);
+	DrawDebugString(GetWorld(), Location, FString::FromInt(GetOperationCount()), nullptr, FColor::Yellow, 1.1f, false, 1.3f);
 }
 
 void AFactoryAgentBase::SetState(EAgentState NewState)

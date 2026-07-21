@@ -39,11 +39,14 @@ void AFactoryAtlasRobot::ApplyRestDecay(int32 Amount)
 
 void AFactoryAtlasRobot::ResumeAfterRepair()
 {
-	// 고장 직전 진행 중이던 배정이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로 CurrentAssignment가
-	// 유효하다) 새 배정을 끼워넣지 않는다 — 그 경우의 "이어서 재개"는 Working 재진입이 필요한 별개 문제라
-	// 이번 스코프 밖. 배정이 없던 상태(디버그 강제 고장 등)에서 복구됐을 때만 유휴 스윕으로 새 일감을 받는다.
+	// 버그 수정 — 고장 직전 진행 중이던 배정이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로
+	// CurrentAssignment가 유효하다) Idle로 내리지 않고 Working으로 복귀시킨다. OnWorkingTick의
+	// ZoneRetryIntervalSeconds 재시도 루프가 ContinueShelfAssignment/ContinueTrayAssignment를 다시
+	// 호출해주는데, 이 함수들은 PendingSlotReservation/HeldItem을 보고 재진입 안전하게 이어서 처리하도록
+	// 이미 설계돼 있다(원래는 Idle로 빠져 OnWorkingTick 자체가 다시 호출되지 않아 영영 멈춰있었다).
 	if (CurrentAssignment.IsValid())
 	{
+		SetState(EAgentState::Working);
 		return;
 	}
 
@@ -955,7 +958,7 @@ void AFactoryAtlasRobot::OnAssignmentExhausted()
 
 void AFactoryAtlasRobot::OnTaskCompleted()
 {
-	++OperationCount;
+	OperationCount += OperationCountPerTask;
 
 	if (OperationCount < MaintenanceThreshold)
 	{

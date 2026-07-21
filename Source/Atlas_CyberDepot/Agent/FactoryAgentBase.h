@@ -197,11 +197,15 @@ public:
 	// 6단계에서 베이스에 추가.
 	virtual bool IsMaintenanceDue() const { return false; }
 	virtual float GetOperationRatio() const { return 0.f; }
+	// Docs에 없는 구현값 — AIdleWaitingZone의 배치 정비 디스패치 판정(BatchMaintenanceOperationThreshold)이
+	// 절대값(예: 100) 기준으로 필요해 추가. AtlasRobot/TransportRobot이 override.
+	virtual int32 GetOperationCount() const { return 0; }
 	virtual void ApplyRestDecay(int32 Amount) {}
 
-	// URepairProgressComponent::OnRepairCompleted가 호출 — 고장 직전 진행 중이던 작업을 이어서 재개한다는
-	// 00_DesignPrinciples.md 원칙에 따라 기본은 Idle 전환뿐이고, CurrentAssignment/PendingSlotReservation은
-	// 고장 중에도 그대로 보존돼 있어 별도 복원 로직 없이 다음 EvaluateRotationOrContinue 호출에서 이어진다.
+	// URepairProgressComponent::OnRepairCompleted가 호출. 베이스 기본 구현은 배정/트립이 없는 에이전트용
+	// (Idle 전환뿐). AtlasRobot/TransportRobot는 override해 CurrentAssignment/CurrentTask가 남아있으면
+	// (자연 발생 고장은 항상 Working 도중 롤링되므로 보존돼 있음) Working으로 복귀시켜 기존 재시도 경로가
+	// 이어받게 한다 — 00_DesignPrinciples.md의 "예약을 유지한 채 수리 후 재개" 원칙 실제 구현.
 	virtual void ResumeAfterRepair() { SetState(EAgentState::Idle); }
 
 	// AtlasRobot/TransportRobot가 자신의 RepairComponent를 반환하도록 override한다.
@@ -221,6 +225,12 @@ protected:
 	virtual void OnRep_CurrentState();
 
 private:
+	// Docs에 없는 구현값 — 정비 임계치 테스트용 디버그 표시. GetRepairComponent()가 있는(=Atlas/TransportRobot)
+	// 에이전트만 캡슐 중심 80유닛 위에 1초마다 GetOperationCount()를 정수로 갱신 표시한다.
+	void DrawDebugOperationCountLabel();
+
+	FTimerHandle DebugOperationCountTimerHandle;
+
 	// Tick의 BlockedRecoveryRetryIntervalSeconds 판정용 — 마지막으로 강제 재탐색을 시도했던 시점의
 	// BlockedTimer 값(BlockedTimer 자체는 계속 누적되므로, 이 값과의 차이로 다음 재시도 시점을 판단).
 	float LastBlockedRecoveryAttemptSeconds = 0.f;

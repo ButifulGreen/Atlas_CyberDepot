@@ -111,10 +111,21 @@ void AMSmartFactoryManager::RequestMaintenance(AFactoryAgentBase* Agent, ERepair
 
 void AMSmartFactoryManager::OnAgentBecameIdle(AFactoryAgentBase* Agent)
 {
-	if (Agent && Agent->IsMaintenanceDue())
+	if (!Agent)
 	{
-		RequestMaintenance(Agent, ERepairType::QuickCheck);
+		return;
 	}
+
+	if (!Agent->IsMaintenanceDue())
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[RestDecay] %s 파킹 — 아직 정비 임계치 미도달(OperationRatio=%.2f), QuickCheck 요청 안 함"),
+			*Agent->GetName(), Agent->GetOperationRatio());
+		return;
+	}
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[RestDecay] %s 파킹 즉시 정비 임계치 도달(OperationRatio=%.2f) — 개별 QuickCheck 요청"),
+		*Agent->GetName(), Agent->GetOperationRatio());
+	RequestMaintenance(Agent, ERepairType::QuickCheck);
 }
 
 void AMSmartFactoryManager::OnRepairCompleted(AFactoryAgentBase* Agent)
@@ -149,9 +160,19 @@ bool AMSmartFactoryManager::TryAssignNextPendingMaintenance(AFactoryNPCHuman* NP
 		AFactoryAgentBase* Agent = PendingMaintenanceQueue[0].Get();
 		PendingMaintenanceQueue.RemoveAt(0);
 
-		if (!Agent || Agent->CurrentState != EAgentState::Broken)
+		if (!Agent)
 		{
-			// 이 사이 다른 경로로 이미 정비됐거나(예: 파괴됨) 더 이상 고장 상태가 아니다 — 폐기하고 다음 항목 확인.
+			// 이 사이 파괴됨 — 폐기하고 다음 항목 확인.
+			continue;
+		}
+
+		// 버그 수정 — 대기열엔 Broken(FullRepair) 요청뿐 아니라 QuickCheck 요청(파킹된 채 Idle 상태로
+		// 임계치를 넘긴 로봇, OnAgentBecameIdle 경유)도 들어온다. Broken만 통과시키던 필터가 QuickCheck
+		// 항목을 전부 조용히 버려서 그 로봇들이 영영 정비를 못 받는 문제가 있었다.
+		const bool bStillNeedsRepair = Agent->CurrentState == EAgentState::Broken || Agent->IsMaintenanceDue();
+		if (!bStillNeedsRepair)
+		{
+			// 대기 중 패시브 감쇠로 이미 임계치 아래로 내려갔다 — 더 이상 정비가 필요 없다.
 			continue;
 		}
 
@@ -164,9 +185,11 @@ bool AMSmartFactoryManager::TryAssignNextPendingMaintenance(AFactoryNPCHuman* NP
 			}
 		}
 
-		UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] 대기열에서 %s를 %s 정비로 재배정(잔여 대기 %d건)"),
-			*NPC->GetName(), *Agent->GetName(), PendingMaintenanceQueue.Num());
-		NPC->AssignMaintenance(Agent, ERepairType::FullRepair);
+		const ERepairType RepairType = (Agent->CurrentState == EAgentState::Broken) ? ERepairType::FullRepair : ERepairType::QuickCheck;
+
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] 대기열에서 %s를 %s 정비(%s)로 재배정(잔여 대기 %d건)"),
+			*NPC->GetName(), *Agent->GetName(), RepairType == ERepairType::FullRepair ? TEXT("FullRepair") : TEXT("QuickCheck"), PendingMaintenanceQueue.Num());
+		NPC->AssignMaintenance(Agent, RepairType);
 		return true;
 	}
 

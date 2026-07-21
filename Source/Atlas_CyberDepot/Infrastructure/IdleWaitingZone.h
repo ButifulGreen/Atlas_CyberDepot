@@ -50,13 +50,18 @@ public:
 	bool IsUsableBy(EActorType AgentType) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
-	float RestDecayIntervalSeconds = 10.f;
+	float RestDecayIntervalSeconds = 2.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
-	int32 RestDecayAmountPerInterval = 10;
+	int32 RestDecayAmountPerInterval = 20;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	float FullyRestedThresholdRatio = 0.2f;
+
+	// Docs에 없는 구현값 — 배치 정비 디스패치 판정(ShouldDispatchNPCForMaintenance)이 쓰는 절대 OperationCount
+	// 기준. 개별 QuickCheck 적격 기준(IsMaintenanceDue, MaintenanceThreshold)과는 별개의 상위 문턱값이다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Maintenance")
+	int32 BatchMaintenanceOperationThreshold = 100;
 
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	EZoneMaintenanceState MaintenanceState = EZoneMaintenanceState::Idle;
