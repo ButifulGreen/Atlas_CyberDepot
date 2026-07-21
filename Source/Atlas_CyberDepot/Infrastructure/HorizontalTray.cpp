@@ -66,6 +66,22 @@ void AHorizontalTray::ReleaseWorkZone()
 	WorkZoneOccupant.Reset();
 }
 
+bool AHorizontalTray::TryReserveTransportRobotWorkZone(AFactoryAgentBase* Agent)
+{
+	if (!Agent || TransportRobotWorkZoneOccupant.IsValid())
+	{
+		return false;
+	}
+
+	TransportRobotWorkZoneOccupant = Agent;
+	return true;
+}
+
+void AHorizontalTray::ReleaseTransportRobotWorkZone()
+{
+	TransportRobotWorkZoneOccupant.Reset();
+}
+
 void AHorizontalTray::OnItemSpawnedAtStart(ALogisticsItem* Item)
 {
 	if (!Item)
@@ -132,4 +148,5 @@ void AHorizontalTray::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AHorizontalTray, CurrentItem);
 	DOREPLIFETIME(AHorizontalTray, bIsHaltedAtEnd);
 	DOREPLIFETIME(AHorizontalTray, WorkZoneOccupant);
+	DOREPLIFETIME(AHorizontalTray, TransportRobotWorkZoneOccupant);
 }

@@ -111,12 +111,7 @@ void AFactoryTransportRobot::AcceptTransportTask(const FTransportTask& Task)
 	AbandonAnyActiveWaypointRoute();
 
 	CurrentTask = Task;
-
-	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
-	{
-		SetState(EAgentState::Moving);
-		AIController->RequestMoveWithFilter(GetTaskPointLocation(Task.PickupPoint.Get(), true));
-	}
+	TryStartMoveToPoint(Task.PickupPoint.Get(), true);
 
 	if (UGameInstance* GI = GetGameInstance())
 	{
@@ -167,11 +162,7 @@ void AFactoryTransportRobot::OnItemGivenByAtlas(ALogisticsItem* Item)
 		}
 	}
 
-	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
-	{
-		SetState(EAgentState::Moving);
-		AIController->RequestMoveWithFilter(GetTaskPointLocation(CurrentTask.DropoffPoint.Get(), false));
-	}
+	TryStartMoveToPoint(CurrentTask.DropoffPoint.Get(), false);
 }
 
 void AFactoryTransportRobot::OnItemCollectedByAtlas()
@@ -181,6 +172,11 @@ void AFactoryTransportRobot::OnItemCollectedByAtlas()
 		PayloadItem->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 		PayloadItem = nullptr;
 	}
+
+	// 버그 수정 — 지금 서있던 지점이 트레이 작업 지점이었다면(출고 트레이 등) 여기서 반납해야 다음
+	// 배송로봇이 같은 지점으로 이동을 시도할 수 있다. OnTaskCompleted 이후 경로(다음 트립 수락/대기실행)는
+	// 전부 TryStartMoveToPoint를 거치지 않는 경우가 있어(TryHeadToIdleZone 등) 여기서 명시적으로 반납한다.
+	ReleaseReservedTrayZone();
 
 	OnTaskCompleted();
 }
@@ -355,11 +351,97 @@ void AFactoryTransportRobot::RetargetCurrentTaskSlot(int32 NewFloorIndex, int32 
 
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] 짝 아틀라스의 선반칸 재할당에 맞춰 (Floor=%d,Slot=%d)로 재이동"),
 		*GetName(), NewFloorIndex, NewSlotIndex);
-	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+	TryStartMoveToPoint(Shelf, bIsPickupSide);
+}
+
+void AFactoryTransportRobot::TryStartMoveToPoint(AActor* PointActor, bool bIsPickupSide)
+{
+	// 다음 목적지로 넘어가는 시점이므로, 이전에 붙잡고 있던 트레이 예약이 있으면 먼저 반납한다.
+	ReleaseReservedTrayZone();
+
+	// 버그 수정 — 예전엔 이 아래 트레이 점유 재시도 분기가 SetState(Moving)보다 먼저 return해서, 방금
+	// 트립을 배정받은 로봇이 첫 이동 시도에서 하필 작업 지점이 점유 중이면 CurrentTask는 이미 찼는데
+	// CurrentState는 Idle에 그대로 머물렀다. 그 틈에 배차 스윕이 다시 돌면 이 로봇을 "아직 유휴"로
+	// 오판해 또 배정을 시도하고(TryAssignIdleTransportRobot의 이중배정 방어에 걸려 거부됨), 거부 시
+	// 호출부가 "줄 일이 없다"고 보고 TryHeadToIdleZone()으로 보내버려 진행 중이던 트립을 CurrentTask에
+	// 남긴 채 로봇만 대기실로 떠나는 문제가 있었다(대기열로 같은 트레이에 로봇이 몰리면서 자주 재현됨).
+	// 이동 시도가 시작되는 즉시(점유 재시도 여부와 무관하게) Moving으로 반영해 이 틈을 없앤다.
+	SetState(EAgentState::Moving);
+
+	// 버그 수정 — 같은 트립의 아틀라스가 이미 핸드오프 지점 근처에 있다면 서로 Crowd 회피 대상이 되지
+	// 않도록 미리 무시를 걸어둔다(이동 실패 Code=1 Blocked로 제자리에서 밀고 당기는 문제 대응).
+	AFactoryAtlasRobot* TripAtlas = FindAtlasForTrip(CurrentTask.TaskID);
+	if (TripAtlas)
 	{
-		SetState(EAgentState::Moving);
-		AIController->RequestMoveWithFilter(GetTaskPointLocation(Shelf, bIsPickupSide));
+		if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+		{
+			AIController->SetAvoidanceIgnoreActor(TripAtlas, true);
+		}
 	}
+
+	if (AHorizontalTray* Tray = Cast<AHorizontalTray>(PointActor))
+	{
+		// 버그 수정(사용자 지시) — 트레이는 작업 지점이 하나뿐인데, 같은 아틀라스의 여러 트립이 이
+		// 트레이를 순차 방문할 수 있다. 트립 순서는 절대 불변(고장은 그 자리에서 정비되므로 다른
+		// 로봇으로 대체 불가)인데, 배송로봇 쪽은 물리적 도착 순서로 존을 선점해버려서 나중 트립의
+		// 로봇이 먼저 도착하면 아틀라스가 실제로 기다리는 이전 트립의 로봇이 영원히 못 들어오는 순환
+		// 교착이 발생했다(실제 재현). 아틀라스가 아직 내 트립까지 처리하지 않았으면(=이전 트립 처리
+		// 중이면 FindAtlasForTrip이 null) 존 예약은커녕 **이동 자체를 시작하지 않는다**(아래
+		// TryRequestWaypointRoute 호출 전에 여기서 반환) — 마커에 물리적으로 진입하는 것 자체를 막아,
+		// 도착 순서와 무관하게 항상 트립 순서대로만 진입이 성립하게 한다.
+		if (!TripAtlas)
+		{
+			UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] %s 진입 대기 — 아틀라스가 아직 이 트립까지 처리하지 않음(이전 트립 처리 중), %.1f초 후 재확인"),
+				*GetName(), *Tray->GetName(), TrayZoneRetryIntervalSeconds);
+			PendingMovePoint = PointActor;
+			bPendingMoveIsPickupSide = bIsPickupSide;
+			GetWorldTimerManager().SetTimer(TrayZoneWaitTimerHandle, this, &AFactoryTransportRobot::RetryMoveToPendingPoint, TrayZoneRetryIntervalSeconds, false);
+			return;
+		}
+
+		if (!Tray->TryReserveTransportRobotWorkZone(this))
+		{
+			UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] %s 작업 지점이 이미 점유 중 — %.1f초 후 재시도"),
+				*GetName(), *Tray->GetName(), TrayZoneRetryIntervalSeconds);
+			PendingMovePoint = PointActor;
+			bPendingMoveIsPickupSide = bIsPickupSide;
+			GetWorldTimerManager().SetTimer(TrayZoneWaitTimerHandle, this, &AFactoryTransportRobot::RetryMoveToPendingPoint, TrayZoneRetryIntervalSeconds, false);
+			return;
+		}
+
+		ReservedTrayZone = Tray;
+	}
+	else if (!Cast<AStorageShelf>(PointActor))
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TryStartMoveToPoint 실패 — PointActor(%s)가 Tray도 Shelf도 아님"),
+			*GetName(), PointActor ? *PointActor->GetName() : TEXT("Invalid"));
+		return;
+	}
+
+	// 버그 수정 — 슬롯/트레이마다 사람이 미리 지정해둔 고정 도킹 참조(TransportRobotInboundDock(s)) 대신,
+	// 목표 마커 좌표에 가장 가깝고 실제로 도달 가능한 웨이포인트를 매번 동적으로 찾는다
+	// (Docs/08_Navigation.md §8-B, TryRequestWaypointRoute(nullptr, ...)). 점유/경로 없음도 전부
+	// TryRequestWaypointRoute 내부 재시도로만 처리하고 직행 폴백은 두지 않는다 — 대기실 복귀 경로와 동일 원칙.
+	TryRequestWaypointRoute(nullptr, GetTaskPointLocation(PointActor, bIsPickupSide));
+}
+
+void AFactoryTransportRobot::RetryMoveToPendingPoint()
+{
+	AActor* Point = PendingMovePoint.Get();
+	PendingMovePoint = nullptr;
+	if (Point)
+	{
+		TryStartMoveToPoint(Point, bPendingMoveIsPickupSide);
+	}
+}
+
+void AFactoryTransportRobot::ReleaseReservedTrayZone()
+{
+	if (AHorizontalTray* Tray = ReservedTrayZone.Get())
+	{
+		Tray->ReleaseTransportRobotWorkZone();
+	}
+	ReservedTrayZone = nullptr;
 }
 
 void AFactoryTransportRobot::TriggerBreakdown()

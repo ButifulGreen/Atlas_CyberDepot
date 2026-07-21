@@ -43,6 +43,12 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	TWeakObjectPtr<AFactoryAgentBase> WorkZoneOccupant;
 
+	// 버그 수정 — GetTransportRobotWorkLocation()은 트레이당 좌표 하나뿐인데(슬롯처럼 여러 개가 아님)
+	// 배송로봇 쪽엔 이 지점에 대한 점유 예약이 없었다. 물량이 몰려 같은 트레이로 트립이 연달아 들어오면
+	// 두 번째 배송로봇이 첫 번째가 서있는 지점으로 그대로 이동을 시도해 길찾기가 영구 차단될 수 있었다.
+	UPROPERTY(Replicated, BlueprintReadOnly)
+	TWeakObjectPtr<AFactoryAgentBase> TransportRobotWorkZoneOccupant;
+
 	// 버그 수정 — 아틀라스/배송로봇의 작업 위치는 물품이 실제로 멈춰서 상호작용 가능한 지점인
 	// ItemEndMarker를 기준으로 계산해야 한다. 별도의 WorkMarker는 ItemEndMarker와 물리적으로
 	// 동기화해야 하는 중복 컴포넌트였고, 레벨에서 둘을 다르게 배치하면 엉뚱한 위치로 이동하는
@@ -76,6 +82,9 @@ public:
 
 	bool TryReserveWorkZone(AFactoryAgentBase* Agent);
 	void ReleaseWorkZone();
+
+	bool TryReserveTransportRobotWorkZone(AFactoryAgentBase* Agent);
+	void ReleaseTransportRobotWorkZone();
 
 	void OnItemSpawnedAtStart(ALogisticsItem* Item);
 	void OnItemPlacedByAtlas(ALogisticsItem* Item);
