@@ -817,8 +817,17 @@ void AFactoryAtlasRobot::ContinueShelfAssignment()
 	// 이번 슬롯의 leg 완료 — 남은 슬롯이 있으면 그 위치로, 없으면(RemainingCount<=0) 배정 종료.
 	if (CurrentAssignment.RemainingCount > 0 && PopNextReservedSlot())
 	{
+		// 버그 수정(사용자 리포트) — 같은 배정 안에서 다음 슬롯으로 넘어가는 이 지점이 예전부터
+		// RequestMoveWithFilter로 그래프를 아예 안 타는 순수 직행이었다(같은 선반이라 거리가 짧다는
+		// 전제). 두 슬롯이 선반 위에서 멀리 떨어져 있으면(다른 층/칸) 근처 웨이포인트를 무시하고
+		// 목표 슬롯 근처로 곧장 이동하는 것처럼 보였다 — StartCurrentAssignment와 동일하게
+		// TryRequestWaypointRoute로 통일. SetState(Moving)도 StartCurrentAssignment와 동일하게 호출
+		// 전에 미리 반영 — TryRequestWaypointRoute는 실패(경로 없음/첫 홉 예약 경합) 분기에서 상태를
+		// 안 건드리므로, 여기서 먼저 안 해두면 재시도 대기 중에 CurrentState가 Working에 눌러붙어
+		// OnWorkingTick이 계속 ContinueShelfAssignment를 불러 PopNextReservedSlot을 중복 호출한다.
+		IgnoreTransportRobotForCurrentTrip(AIController);
 		SetState(EAgentState::Moving);
-		AIController->RequestMoveWithFilter(Shelf->GetAtlasWorkLocation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, CurrentAssignment.ZoneType));
+		TryRequestWaypointRoute(nullptr, Shelf->GetAtlasWorkLocation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, CurrentAssignment.ZoneType));
 	}
 	else
 	{
