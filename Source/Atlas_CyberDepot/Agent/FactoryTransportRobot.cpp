@@ -515,7 +515,7 @@ bool AFactoryTransportRobot::HasRestedTransportRobotAvailable() const
 	for (AActor* ZoneActor : FoundZones)
 	{
 		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(ZoneActor);
-		if (Zone && Zone->AllowedAgentType == EActorType::TransportRobot && Zone->FindRestedOccupant())
+		if (Zone && Zone->IsUsableBy(EActorType::TransportRobot) && Zone->FindRestedOccupant())
 		{
 			return true;
 		}

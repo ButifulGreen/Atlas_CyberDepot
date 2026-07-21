@@ -38,56 +38,111 @@ void UOutboundDispatchSubsystem::AssignHomeIdleZoneSlots()
 		return;
 	}
 
-	auto AssignForType = [World](EActorType AgentType)
+	struct FAgentEntry
 	{
-		TArray<AActor*> FoundAgents;
-		UGameplayStatics::GetAllActorsOfClass(World, AFactoryAgentBase::StaticClass(), FoundAgents);
-
-		TArray<AFactoryAgentBase*> Agents;
-		for (AActor* Actor : FoundAgents)
-		{
-			if (AFactoryAgentBase* Agent = Cast<AFactoryAgentBase>(Actor))
-			{
-				if (Agent->AgentType == AgentType)
-				{
-					Agents.Add(Agent);
-				}
-			}
-		}
-
-		// 실행할 때마다 동일한 결과가 나오도록 이름순으로 정렬 — 레벨에 저장된 액터 이름은 실행마다 바뀌지 않는다.
-		Agents.Sort([](const AFactoryAgentBase& A, const AFactoryAgentBase& B) { return A.GetName() < B.GetName(); });
-
-		TArray<AActor*> FoundZones;
-		UGameplayStatics::GetAllActorsOfClass(World, AIdleWaitingZone::StaticClass(), FoundZones);
-
-		TArray<AIdleWaitingZone*> Zones;
-		for (AActor* Actor : FoundZones)
-		{
-			if (AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(Actor))
-			{
-				if (Zone->AllowedAgentType == AgentType)
-				{
-					Zones.Add(Zone);
-				}
-			}
-		}
-		Zones.Sort([](const AIdleWaitingZone& A, const AIdleWaitingZone& B) { return A.GetName() < B.GetName(); });
-
-		// 대기실을 순서대로 순회하며 각자의 마커 개수만큼 로봇을 소비한다. 대기실 배치(마커 총합)가 항상
-		// 로봇 수 이상이라고 가정하므로(사용자가 직접 배치), 로봇이 남는 경우는 고려하지 않는다.
-		for (AIdleWaitingZone* Zone : Zones)
-		{
-			if (Agents.Num() == 0)
-			{
-				break;
-			}
-			Zone->AssignHomeSlots(Agents);
-		}
+		AFactoryAgentBase* Agent = nullptr;
+		FVector Location = FVector::ZeroVector;
 	};
 
-	AssignForType(EActorType::AtlasRobot);
-	AssignForType(EActorType::TransportRobot);
+	TArray<AActor*> FoundAgents;
+	UGameplayStatics::GetAllActorsOfClass(World, AFactoryAgentBase::StaticClass(), FoundAgents);
+
+	TArray<FAgentEntry> Agents;
+	for (AActor* Actor : FoundAgents)
+	{
+		if (AFactoryAgentBase* Agent = Cast<AFactoryAgentBase>(Actor))
+		{
+			if (Agent->AgentType == EActorType::AtlasRobot || Agent->AgentType == EActorType::TransportRobot)
+			{
+				Agents.Add({ Agent, Agent->GetActorLocation() });
+			}
+		}
+	}
+
+	// 실행할 때마다 동일한 결과가 나오도록(거리 동률 시 등) 이름순으로 먼저 정렬 — 레벨에 저장된 액터
+	// 이름은 실행마다 바뀌지 않는다.
+	Agents.Sort([](const FAgentEntry& A, const FAgentEntry& B) { return A.Agent->GetName() < B.Agent->GetName(); });
+
+	struct FSlotEntry
+	{
+		AIdleWaitingZone* Zone = nullptr;
+		int32 SlotIndex = 0;
+		FVector Location = FVector::ZeroVector;
+	};
+
+	TArray<AActor*> FoundZones;
+	UGameplayStatics::GetAllActorsOfClass(World, AIdleWaitingZone::StaticClass(), FoundZones);
+
+	TArray<FSlotEntry> Slots;
+	for (AActor* Actor : FoundZones)
+	{
+		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(Actor);
+		if (!Zone)
+		{
+			continue;
+		}
+
+		TArray<TPair<int32, FVector>> ZoneSlots;
+		Zone->GetParkingSlotLocations(ZoneSlots);
+		for (const TPair<int32, FVector>& SlotPair : ZoneSlots)
+		{
+			Slots.Add({ Zone, SlotPair.Key, SlotPair.Value });
+		}
+	}
+	Slots.Sort([](const FSlotEntry& A, const FSlotEntry& B)
+	{
+		if (A.Zone != B.Zone)
+		{
+			return A.Zone->GetName() < B.Zone->GetName();
+		}
+		return A.SlotIndex < B.SlotIndex;
+	});
+
+	// 버그 수정(사용자 지시) — 예전엔 타입별로 로봇/대기실 풀을 완전히 나눠 이름순으로 앞에서부터
+	// 채웠다(물리적 위치 무관). AllowedAgentTypes가 비트마스크가 되면서 한 대기실이 아틀라스/배송로봇을
+	// 동시에 받을 수 있어, 타입별 분리 풀 자체가 부적절해졌다. 이제 로봇-슬롯 전체 조합 중 "아직 안
+	// 정해졌고 타입이 허용되는" 쌍 중 가장 가까운 것부터 하나씩 그리디하게 확정한다. 대기실 배치(마커
+	// 총합)가 항상 로봇 수 이상이라고 가정하므로(사용자가 직접 배치), 로봇이 남는 경우는 고려하지 않는다.
+	while (Agents.Num() > 0 && Slots.Num() > 0)
+	{
+		int32 BestAgentIndex = INDEX_NONE;
+		int32 BestSlotIndex = INDEX_NONE;
+		float BestDistSq = TNumericLimits<float>::Max();
+
+		for (int32 AgentIndex = 0; AgentIndex < Agents.Num(); ++AgentIndex)
+		{
+			for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
+			{
+				if (!Slots[SlotIndex].Zone->IsUsableBy(Agents[AgentIndex].Agent->AgentType))
+				{
+					continue;
+				}
+
+				const float DistSq = FVector::DistSquared(Agents[AgentIndex].Location, Slots[SlotIndex].Location);
+				if (DistSq < BestDistSq)
+				{
+					BestDistSq = DistSq;
+					BestAgentIndex = AgentIndex;
+					BestSlotIndex = SlotIndex;
+				}
+			}
+		}
+
+		if (BestAgentIndex == INDEX_NONE)
+		{
+			// 남은 로봇들의 타입을 허용하는 슬롯이 더 이상 없음 — 레벨 배치 문제이니 조용히 넘기지 않고 남긴다.
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Dispatch] AssignHomeIdleZoneSlots — 남은 로봇 %d대를 배정할 수 있는 대기실 슬롯이 없음(AllowedAgentTypes 배치 확인 필요)"),
+				Agents.Num());
+			break;
+		}
+
+		AFactoryAgentBase* ChosenAgent = Agents[BestAgentIndex].Agent;
+		const FSlotEntry ChosenSlot = Slots[BestSlotIndex];
+		ChosenAgent->AssignHomeIdleZoneSlot(ChosenSlot.Zone, ChosenSlot.SlotIndex);
+
+		Agents.RemoveAt(BestAgentIndex);
+		Slots.RemoveAt(BestSlotIndex);
+	}
 }
 
 AStorageShelf* UOutboundDispatchSubsystem::FindShelfForItemType(EItemType ItemType) const

@@ -85,9 +85,12 @@ protected:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 private:
-	// 7단계 후속 — "선입선출 없이 실행 시 1회만 고정 배정" 규칙. AllowedAgentType별로 레벨의 로봇과
-	// 대기실을 각각 이름순으로 정렬해 안정적인 순서를 보장한 뒤, 대기실을 순회하며 자기 마커 개수만큼
-	// 로봇을 소비시켜 AFactoryAgentBase::AssignHomeIdleZoneSlot으로 고정 배정한다.
+	// 7단계 후속 — "선입선출 없이 실행 시 1회만 고정 배정" 규칙. 버그 수정(사용자 지시) — 예전엔
+	// AllowedAgentType(단일값)별로 로봇/대기실 풀을 완전히 분리해 이름순으로 그냥 앞에서부터 채웠다
+	// (물리적 위치 무관). AllowedAgentTypes가 비트마스크로 바뀌어 한 대기실이 아틀라스/배송로봇을 동시에
+	// 받을 수 있게 된 이상 타입별 분리 자체가 부적절해졌고, 이 참에 배정 기준도 "시작 시점에 마커와
+	// 물리적으로 가장 가까운 로봇"으로 바꿨다 — 모든 로봇 + 모든 대기실의 모든 슬롯을 한 번에 모아,
+	// 아직 안 정해진 슬롯-로봇 쌍 중 가장 가까운 조합을 하나씩 그리디하게 확정한다.
 	void AssignHomeIdleZoneSlots();
 
 	// 버그 수정 — UWorldSubsystem::OnWorldBeginPlay는 UWorld::BeginPlay() 안에서 GameMode->StartPlay()보다

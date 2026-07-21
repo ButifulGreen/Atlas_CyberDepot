@@ -39,9 +39,15 @@ class AIdleWaitingZone : public AActor
 public:
 	AIdleWaitingZone();
 
-	// Docs의 EAgentType은 2단계에서 EActorType으로 통합했다
-	UPROPERTY(EditAnywhere, BlueprintReadOnly)
-	EActorType AllowedAgentType = EActorType::AtlasRobot;
+	// 버그 수정(사용자 지시) — 원래 단일값 EActorType이라 대기실 하나가 아틀라스 전용/배송로봇 전용
+	// 둘 중 하나로만 고정됐다. 좁은 구간/로봇 수 확장에 대응해 한 대기실이 아틀라스·배송로봇 둘 다(혹은
+	// 하나만) 받을 수 있도록 AFactoryNavWaypoint::AllowedAgentTypes와 동일한 비트마스크 패턴으로 전환.
+	// 프로퍼티 타입이 바뀌어서 기존에 레벨에서 골라뒀던 값은 이어받지 못한다 — 이미 배치한 대기실은
+	// 이 변경 이후 다시 체크해야 한다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (Bitmask, BitmaskEnum = "/Script/Atlas_CyberDepot.EActorType"))
+	int32 AllowedAgentTypes = (1 << static_cast<int32>(EActorType::AtlasRobot));
+
+	bool IsUsableBy(EActorType AgentType) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	float RestDecayIntervalSeconds = 10.f;
@@ -70,9 +76,11 @@ public:
 	// RestDecay/QuickCheck 대상이 되지 않는다.
 	void MarkSlotOccupied(AFactoryAgentBase* Agent, int32 SlotIndex);
 	void ReleaseSlot(AFactoryAgentBase* Agent);
-	// 7단계 후속 — InOutRemainingAgents 맨 앞부터 자신의 마커 개수만큼 소비해 각 로봇에게 고정 홈 슬롯을
-	// 배정한다(선입선출 아님, 실행 시 1회만 호출). UOutboundDispatchSubsystem::AssignHomeIdleZoneSlots가 호출.
-	void AssignHomeSlots(TArray<AFactoryAgentBase*>& InOutRemainingAgents);
+	// 버그 수정(사용자 지시) — 예전엔 이름순으로 정렬한 로봇 목록 맨 앞부터 순서대로(물리적 위치 무관)
+	// 채우는 AssignHomeSlots(TArray<AFactoryAgentBase*>&)였다. 이제 UOutboundDispatchSubsystem이 모든
+	// 대기실의 슬롯 위치를 한 번에 모아 로봇과의 실제 거리로 그리디 최근접 매칭을 하므로, 이 대기실은
+	// 자기 슬롯들의 (SlotIndex, 위치) 목록만 제공한다(순수 조회, 부작용 없음). 실행 시 1회만 호출.
+	void GetParkingSlotLocations(TArray<TPair<int32, FVector>>& OutSlots) const;
 	bool IsAgentParked(const AFactoryAgentBase* Agent) const;
 	AFactoryAgentBase* FindRestedOccupant() const;
 	void OnRestDecayInterval();

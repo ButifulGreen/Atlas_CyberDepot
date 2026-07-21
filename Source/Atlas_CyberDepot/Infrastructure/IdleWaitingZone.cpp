@@ -59,19 +59,21 @@ void AIdleWaitingZone::MarkSlotOccupied(AFactoryAgentBase* Agent, int32 SlotInde
 	}
 }
 
-void AIdleWaitingZone::AssignHomeSlots(TArray<AFactoryAgentBase*>& InOutRemainingAgents)
+void AIdleWaitingZone::GetParkingSlotLocations(TArray<TPair<int32, FVector>>& OutSlots) const
 {
+	OutSlots.Reset(ParkingMarkers.Num());
 	for (const UParkingSlotMarkerComponent* Marker : ParkingMarkers)
 	{
-		if (!Marker || InOutRemainingAgents.Num() == 0)
+		if (Marker)
 		{
-			break;
+			OutSlots.Add(TPair<int32, FVector>(Marker->SlotIndex, Marker->GetComponentLocation()));
 		}
-
-		AFactoryAgentBase* Agent = InOutRemainingAgents[0];
-		InOutRemainingAgents.RemoveAt(0);
-		Agent->AssignHomeIdleZoneSlot(this, Marker->SlotIndex);
 	}
+}
+
+bool AIdleWaitingZone::IsUsableBy(EActorType AgentType) const
+{
+	return (AllowedAgentTypes & (1 << static_cast<int32>(AgentType))) != 0;
 }
 
 void AIdleWaitingZone::ReleaseSlot(AFactoryAgentBase* Agent)

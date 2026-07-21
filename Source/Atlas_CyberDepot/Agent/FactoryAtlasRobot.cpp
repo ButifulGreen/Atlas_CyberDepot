@@ -160,7 +160,7 @@ void AFactoryAtlasRobot::EvaluateRotationOrContinue()
 	for (AActor* ZoneActor : FoundZones)
 	{
 		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(ZoneActor);
-		if (!Zone || Zone->AllowedAgentType != EActorType::AtlasRobot)
+		if (!Zone || !Zone->IsUsableBy(EActorType::AtlasRobot))
 		{
 			continue;
 		}
