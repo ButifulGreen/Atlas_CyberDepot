@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Assignment/OutboundDispatchSubsystem.h"
+#include "Atlas_CyberDepot.h"
 #include "Assignment/DeliveryOrderSubsystem.h"
 #include "Agent/FactoryAgentBase.h"
 #include "Agent/FactoryAtlasRobot.h"
@@ -37,56 +38,111 @@ void UOutboundDispatchSubsystem::AssignHomeIdleZoneSlots()
 		return;
 	}
 
-	auto AssignForType = [World](EActorType AgentType)
+	struct FAgentEntry
 	{
-		TArray<AActor*> FoundAgents;
-		UGameplayStatics::GetAllActorsOfClass(World, AFactoryAgentBase::StaticClass(), FoundAgents);
-
-		TArray<AFactoryAgentBase*> Agents;
-		for (AActor* Actor : FoundAgents)
-		{
-			if (AFactoryAgentBase* Agent = Cast<AFactoryAgentBase>(Actor))
-			{
-				if (Agent->AgentType == AgentType)
-				{
-					Agents.Add(Agent);
-				}
-			}
-		}
-
-		// 실행할 때마다 동일한 결과가 나오도록 이름순으로 정렬 — 레벨에 저장된 액터 이름은 실행마다 바뀌지 않는다.
-		Agents.Sort([](const AFactoryAgentBase& A, const AFactoryAgentBase& B) { return A.GetName() < B.GetName(); });
-
-		TArray<AActor*> FoundZones;
-		UGameplayStatics::GetAllActorsOfClass(World, AIdleWaitingZone::StaticClass(), FoundZones);
-
-		TArray<AIdleWaitingZone*> Zones;
-		for (AActor* Actor : FoundZones)
-		{
-			if (AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(Actor))
-			{
-				if (Zone->AllowedAgentType == AgentType)
-				{
-					Zones.Add(Zone);
-				}
-			}
-		}
-		Zones.Sort([](const AIdleWaitingZone& A, const AIdleWaitingZone& B) { return A.GetName() < B.GetName(); });
-
-		// 대기실을 순서대로 순회하며 각자의 마커 개수만큼 로봇을 소비한다. 대기실 배치(마커 총합)가 항상
-		// 로봇 수 이상이라고 가정하므로(사용자가 직접 배치), 로봇이 남는 경우는 고려하지 않는다.
-		for (AIdleWaitingZone* Zone : Zones)
-		{
-			if (Agents.Num() == 0)
-			{
-				break;
-			}
-			Zone->AssignHomeSlots(Agents);
-		}
+		AFactoryAgentBase* Agent = nullptr;
+		FVector Location = FVector::ZeroVector;
 	};
 
-	AssignForType(EActorType::AtlasRobot);
-	AssignForType(EActorType::TransportRobot);
+	TArray<AActor*> FoundAgents;
+	UGameplayStatics::GetAllActorsOfClass(World, AFactoryAgentBase::StaticClass(), FoundAgents);
+
+	TArray<FAgentEntry> Agents;
+	for (AActor* Actor : FoundAgents)
+	{
+		if (AFactoryAgentBase* Agent = Cast<AFactoryAgentBase>(Actor))
+		{
+			if (Agent->AgentType == EActorType::AtlasRobot || Agent->AgentType == EActorType::TransportRobot)
+			{
+				Agents.Add({ Agent, Agent->GetActorLocation() });
+			}
+		}
+	}
+
+	// 실행할 때마다 동일한 결과가 나오도록(거리 동률 시 등) 이름순으로 먼저 정렬 — 레벨에 저장된 액터
+	// 이름은 실행마다 바뀌지 않는다.
+	Agents.Sort([](const FAgentEntry& A, const FAgentEntry& B) { return A.Agent->GetName() < B.Agent->GetName(); });
+
+	struct FSlotEntry
+	{
+		AIdleWaitingZone* Zone = nullptr;
+		int32 SlotIndex = 0;
+		FVector Location = FVector::ZeroVector;
+	};
+
+	TArray<AActor*> FoundZones;
+	UGameplayStatics::GetAllActorsOfClass(World, AIdleWaitingZone::StaticClass(), FoundZones);
+
+	TArray<FSlotEntry> Slots;
+	for (AActor* Actor : FoundZones)
+	{
+		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(Actor);
+		if (!Zone)
+		{
+			continue;
+		}
+
+		TArray<TPair<int32, FVector>> ZoneSlots;
+		Zone->GetParkingSlotLocations(ZoneSlots);
+		for (const TPair<int32, FVector>& SlotPair : ZoneSlots)
+		{
+			Slots.Add({ Zone, SlotPair.Key, SlotPair.Value });
+		}
+	}
+	Slots.Sort([](const FSlotEntry& A, const FSlotEntry& B)
+	{
+		if (A.Zone != B.Zone)
+		{
+			return A.Zone->GetName() < B.Zone->GetName();
+		}
+		return A.SlotIndex < B.SlotIndex;
+	});
+
+	// 버그 수정(사용자 지시) — 예전엔 타입별로 로봇/대기실 풀을 완전히 나눠 이름순으로 앞에서부터
+	// 채웠다(물리적 위치 무관). AllowedAgentTypes가 비트마스크가 되면서 한 대기실이 아틀라스/배송로봇을
+	// 동시에 받을 수 있어, 타입별 분리 풀 자체가 부적절해졌다. 이제 로봇-슬롯 전체 조합 중 "아직 안
+	// 정해졌고 타입이 허용되는" 쌍 중 가장 가까운 것부터 하나씩 그리디하게 확정한다. 대기실 배치(마커
+	// 총합)가 항상 로봇 수 이상이라고 가정하므로(사용자가 직접 배치), 로봇이 남는 경우는 고려하지 않는다.
+	while (Agents.Num() > 0 && Slots.Num() > 0)
+	{
+		int32 BestAgentIndex = INDEX_NONE;
+		int32 BestSlotIndex = INDEX_NONE;
+		float BestDistSq = TNumericLimits<float>::Max();
+
+		for (int32 AgentIndex = 0; AgentIndex < Agents.Num(); ++AgentIndex)
+		{
+			for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
+			{
+				if (!Slots[SlotIndex].Zone->IsUsableBy(Agents[AgentIndex].Agent->AgentType))
+				{
+					continue;
+				}
+
+				const float DistSq = FVector::DistSquared(Agents[AgentIndex].Location, Slots[SlotIndex].Location);
+				if (DistSq < BestDistSq)
+				{
+					BestDistSq = DistSq;
+					BestAgentIndex = AgentIndex;
+					BestSlotIndex = SlotIndex;
+				}
+			}
+		}
+
+		if (BestAgentIndex == INDEX_NONE)
+		{
+			// 남은 로봇들의 타입을 허용하는 슬롯이 더 이상 없음 — 레벨 배치 문제이니 조용히 넘기지 않고 남긴다.
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Dispatch] AssignHomeIdleZoneSlots — 남은 로봇 %d대를 배정할 수 있는 대기실 슬롯이 없음(AllowedAgentTypes 배치 확인 필요)"),
+				Agents.Num());
+			break;
+		}
+
+		AFactoryAgentBase* ChosenAgent = Agents[BestAgentIndex].Agent;
+		const FSlotEntry ChosenSlot = Slots[BestSlotIndex];
+		ChosenAgent->AssignHomeIdleZoneSlot(ChosenSlot.Zone, ChosenSlot.SlotIndex);
+
+		Agents.RemoveAt(BestAgentIndex);
+		Slots.RemoveAt(BestSlotIndex);
+	}
 }
 
 AStorageShelf* UOutboundDispatchSubsystem::FindShelfForItemType(EItemType ItemType) const
@@ -343,9 +399,9 @@ bool UOutboundDispatchSubsystem::IsZoneOccupied(EWorkZoneType ZoneType, AActor* 
 {
 	if (const AStorageShelf* Shelf = Cast<AStorageShelf>(TargetZoneOwner))
 	{
-		return (ZoneType == EWorkZoneType::ShelfInboundZone)
-			? Shelf->InboundZoneOccupant.IsValid()
-			: Shelf->OutboundZoneOccupant.IsValid();
+		// Docs/00_DesignPrinciples.md 스펙 이탈(승인됨) — 단일 점유가 아니라 MaxConcurrentAtlas
+		// 기준 카운트 만석 여부로 판정한다.
+		return Shelf->IsZoneFull(ZoneType);
 	}
 
 	if (const AHorizontalTray* Tray = Cast<AHorizontalTray>(TargetZoneOwner))
@@ -360,6 +416,17 @@ bool UOutboundDispatchSubsystem::TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, F
 {
 	if (!Atlas)
 	{
+		return false;
+	}
+
+	// 방어 로그 — 배송로봇 쪽(TryAssignIdleTransportRobot)과 동일한 이유. 이 아틀라스가 이미
+	// CurrentAssignment를 갖고 있는 채로 또 배정을 받으면 AcceptStationAssignment가 조건 없이
+	// 덮어써서 기존 배정이 정리 없이 사라진다. 정상 경로라면 CurrentState==Idle 확인 후에만
+	// 호출되므로 CurrentAssignment도 항상 비어있어야 한다.
+	if (Atlas->CurrentAssignment.TargetZoneOwner.IsValid())
+	{
+		UE_LOG(LogFactoryDispatch, Error, TEXT("[Dispatch] %s에 배정 거부 — 이미 배정(%s) 진행 중인데 새 배정 시도됨. 후보 배정은 그대로 둠(유실 방지)"),
+			*Atlas->GetName(), *Atlas->CurrentAssignment.AssignmentID.ToString());
 		return false;
 	}
 
@@ -379,6 +446,15 @@ bool UOutboundDispatchSubsystem::TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, F
 
 		Assignment.AssignedAtlas = Atlas;
 		OutAssignment = Assignment;
+
+		// 버그 수정 — TryAssignIdleTransportRobot은 성공 시 로그를 남기지만 이쪽엔 없어서, 특정 존
+		// 배정이 아무에게도 안 잡히는 상황을 로그만으로는 구분할 수 없었다("배정됐는데 안 보임" vs
+		// "애초에 아무도 안 잡음"). 같은 스타일로 남긴다.
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Dispatch] %s에 배정(%s) — Zone=%s, 대상=%s, 남은 트립 %d개"),
+			*Atlas->GetName(), *Assignment.AssignmentID.ToString(), *UEnum::GetValueAsString(Assignment.ZoneType),
+			Assignment.TargetZoneOwner.IsValid() ? *Assignment.TargetZoneOwner->GetName() : TEXT("Invalid"),
+			Assignment.RemainingCount);
+
 		Atlas->AcceptStationAssignment(Assignment);
 		return true;
 	}
@@ -393,10 +469,27 @@ bool UOutboundDispatchSubsystem::TryAssignIdleTransportRobot(AFactoryTransportRo
 		return false;
 	}
 
+	// 방어 로그 — 이 로봇이 이미 CurrentTask를 갖고 있는 채로 또 배정을 받으면 AcceptTransportTask가
+	// CurrentTask를 조건 없이 덮어써서 기존 트립이 정리 없이 통째로 사라진다(그 트립을 기다리던
+	// 아틀라스는 영원히 "배정 안 됨"만 반복). 정상 경로라면 CurrentState==Idle 확인 후에만 호출되므로
+	// CurrentTask도 항상 비어있어야 한다 — 이 분기가 찍히면 그 전제가 깨진 것이니 호출부를 재검토해야 함.
+	if (Robot->CurrentTask.IsValid())
+	{
+		UE_LOG(LogFactoryDispatch, Error, TEXT("[Dispatch] %s에 트립 배정 거부 — 이미 트립(%s) 진행 중인데 새 배정(%s) 시도됨. 대기 작업은 큐에 그대로 둠(유실 방지)"),
+			*Robot->GetName(), *Robot->CurrentTask.TaskID.ToString(), *PendingTransportTasks[0].TaskID.ToString());
+		return false;
+	}
+
 	// 픽업 대기 물품이 있는 거점을 스캔해 작업을 구성하는 로직은 아직 없고,
 	// 지금은 이미 채워져 있는 PendingTransportTasks 큐에서만 꺼내온다.
 	OutTask = PendingTransportTasks[0];
 	PendingTransportTasks.RemoveAt(0);
+
+	// 디버그 편의 — 대기열 기능 도입 후 배송로봇 수 대비 작업 생성 속도가 빠르면 여기서 큐가 계속 쌓인다.
+	// "누가 안 옴" 증상을 볼 때 이 로그로 실제 처리 속도(큐 잔량 추이)를 바로 확인할 수 있다.
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Dispatch] %s에 트립(%s) 배정 — 남은 대기 작업 %d개"),
+		*Robot->GetName(), *OutTask.TaskID.ToString(), PendingTransportTasks.Num());
+
 	Robot->AcceptTransportTask(OutTask);
 	return true;
 }
@@ -505,6 +598,26 @@ void UOutboundDispatchSubsystem::OnStationAssignmentCompleted(const FGuid& Assig
 	}
 
 	EventBus->PublishTaskLifecycle(Event);
+}
+
+void UOutboundDispatchSubsystem::RequeueStationAssignment(FStationAssignment Assignment)
+{
+	// 새 AssignmentID 발급 — 이 값을 참조하는 PendingHandoffs 등이 죽은 배정을 잘못 가리키지 않게 한다.
+	Assignment.AssignmentID = FGuid::NewGuid();
+	Assignment.AssignedAtlas.Reset();
+	ActiveStationAssignments.Add(Assignment);
+
+	UE_LOG(LogFactoryDispatch, Warning, TEXT("[Dispatch] 배정 재큐잉(%s) — Zone=%s, 대상=%s, 남은 트립 %d개"),
+		*Assignment.AssignmentID.ToString(), *UEnum::GetValueAsString(Assignment.ZoneType),
+		Assignment.TargetZoneOwner.IsValid() ? *Assignment.TargetZoneOwner->GetName() : TEXT("Invalid"),
+		Assignment.RemainingCount);
+}
+
+void UOutboundDispatchSubsystem::RequeueTransportTask(const FTransportTask& Task)
+{
+	PendingTransportTasks.Add(Task);
+	UE_LOG(LogFactoryDispatch, Warning, TEXT("[Dispatch] 트립(%s) 재큐잉 — 대기 작업 %d개"),
+		*Task.TaskID.ToString(), PendingTransportTasks.Num());
 }
 
 void UOutboundDispatchSubsystem::OnTransportTaskCompleted(const FGuid& TaskID, AFactoryTransportRobot* Robot)

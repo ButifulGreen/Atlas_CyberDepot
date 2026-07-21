@@ -58,6 +58,14 @@ public:
 	void OnHandoffAtlasArrivedAtStagingPoint(const FGuid& AssignmentID);
 	void OnStationAssignmentCompleted(const FGuid& AssignmentID);
 
+	// 버그 수정(사용자 지시, 근본 원인인 회피 국소최소 문제와 별개로 우선 반영) — OnMoveFailedPermanently는
+	// 재큐잉하지 않는 게 원래 의도였지만, 회피가 막힌 지점에서 배정이 조용히 죽어 사이클 전체가 멈추는
+	// 빈도가 테스트를 막을 정도로 잦아졌다. 실패한 배정을 새 AssignmentID로 다시 큐에 넣어 다른 아틀라스가
+	// 이어받게 한다 — 같은 지점이 계속 막히면 다음 아틀라스도 반복해서 실패할 수 있다는 트레이드오프는 감수.
+	void RequeueStationAssignment(FStationAssignment Assignment);
+	// TaskID는 유지 — 이 값으로 아틀라스 쪽 ReservedSlots(TripTaskID)와 짝지어지므로 바뀌면 영구 미아가 된다.
+	void RequeueTransportTask(const FTransportTask& Task);
+
 	// 문서는 TaskID만 받지만, 이벤트에 실을 ActorID/ActorType을 얻으려면 호출자(로봇)가 필요해 매개변수로 추가
 	void OnTransportTaskCompleted(const FGuid& TaskID, AFactoryTransportRobot* Robot);
 
@@ -77,9 +85,12 @@ protected:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 private:
-	// 7단계 후속 — "선입선출 없이 실행 시 1회만 고정 배정" 규칙. AllowedAgentType별로 레벨의 로봇과
-	// 대기실을 각각 이름순으로 정렬해 안정적인 순서를 보장한 뒤, 대기실을 순회하며 자기 마커 개수만큼
-	// 로봇을 소비시켜 AFactoryAgentBase::AssignHomeIdleZoneSlot으로 고정 배정한다.
+	// 7단계 후속 — "선입선출 없이 실행 시 1회만 고정 배정" 규칙. 버그 수정(사용자 지시) — 예전엔
+	// AllowedAgentType(단일값)별로 로봇/대기실 풀을 완전히 분리해 이름순으로 그냥 앞에서부터 채웠다
+	// (물리적 위치 무관). AllowedAgentTypes가 비트마스크로 바뀌어 한 대기실이 아틀라스/배송로봇을 동시에
+	// 받을 수 있게 된 이상 타입별 분리 자체가 부적절해졌고, 이 참에 배정 기준도 "시작 시점에 마커와
+	// 물리적으로 가장 가까운 로봇"으로 바꿨다 — 모든 로봇 + 모든 대기실의 모든 슬롯을 한 번에 모아,
+	// 아직 안 정해진 슬롯-로봇 쌍 중 가장 가까운 조합을 하나씩 그리디하게 확정한다.
 	void AssignHomeIdleZoneSlots();
 
 	// 버그 수정 — UWorldSubsystem::OnWorldBeginPlay는 UWorld::BeginPlay() 안에서 GameMode->StartPlay()보다

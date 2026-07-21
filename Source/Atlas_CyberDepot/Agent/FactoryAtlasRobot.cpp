@@ -9,6 +9,7 @@
 #include "Infrastructure/HorizontalTray.h"
 #include "Infrastructure/IdleWaitingZone.h"
 #include "Assignment/OutboundDispatchSubsystem.h"
+#include "Assignment/InventoryOrderSubsystem.h"
 #include "Assignment/SmartFactoryManager.h"
 #include "Repair/RepairProgressComponent.h"
 #include "EventBus/FactoryEventBusSubsystem.h"
@@ -38,15 +39,18 @@ void AFactoryAtlasRobot::ApplyRestDecay(int32 Amount)
 
 void AFactoryAtlasRobot::ResumeAfterRepair()
 {
-	Super::ResumeAfterRepair();
-
-	// 고장 직전 진행 중이던 배정이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로 CurrentAssignment가
-	// 유효하다) 새 배정을 끼워넣지 않는다 — 그 경우의 "이어서 재개"는 Working 재진입이 필요한 별개 문제라
-	// 이번 스코프 밖. 배정이 없던 상태(디버그 강제 고장 등)에서 복구됐을 때만 유휴 스윕으로 새 일감을 받는다.
+	// 버그 수정 — 고장 직전 진행 중이던 배정이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로
+	// CurrentAssignment가 유효하다) Idle로 내리지 않고 Working으로 복귀시킨다. OnWorkingTick의
+	// ZoneRetryIntervalSeconds 재시도 루프가 ContinueShelfAssignment/ContinueTrayAssignment를 다시
+	// 호출해주는데, 이 함수들은 PendingSlotReservation/HeldItem을 보고 재진입 안전하게 이어서 처리하도록
+	// 이미 설계돼 있다(원래는 Idle로 빠져 OnWorkingTick 자체가 다시 호출되지 않아 영영 멈춰있었다).
 	if (CurrentAssignment.IsValid())
 	{
+		SetState(EAgentState::Working);
 		return;
 	}
+
+	Super::ResumeAfterRepair();
 
 	if (UWorld* World = GetWorld())
 	{
@@ -77,6 +81,10 @@ float AFactoryAtlasRobot::ComputeCurrentBreakdownChance() const
 void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff)
 {
 	LeaveIdleZoneIfParked();
+	// 버그 수정 — 웨이포인트 그래프로 이동하던 도중(대기실行 등) 새 배정이 끼어들면, 그때 쥐고 있던 노드
+	// 예약을 반납할 기회 없이 CurrentAssignment/StartCurrentAssignment로 바로 넘어가 그 노드가 영구
+	// 점유 상태로 남았다(FactoryAgentBase::AbandonAnyActiveWaypointRoute 주석 참고).
+	AbandonAnyActiveWaypointRoute();
 
 	CurrentAssignment = Assignment;
 
@@ -155,7 +163,7 @@ void AFactoryAtlasRobot::EvaluateRotationOrContinue()
 	for (AActor* ZoneActor : FoundZones)
 	{
 		AIdleWaitingZone* Zone = Cast<AIdleWaitingZone>(ZoneActor);
-		if (!Zone || Zone->AllowedAgentType != EActorType::AtlasRobot)
+		if (!Zone || !Zone->IsUsableBy(EActorType::AtlasRobot))
 		{
 			continue;
 		}
@@ -328,6 +336,11 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 
 void AFactoryAtlasRobot::OnArrivedAtDestination()
 {
+	if (TryHandleWaypointRouteArrival())
+	{
+		return;
+	}
+
 	if (TryHandleIdleZoneArrival())
 	{
 		return;
@@ -368,6 +381,83 @@ void AFactoryAtlasRobot::OnArrivedAtDestination()
 	}
 }
 
+void AFactoryAtlasRobot::OnMoveFailedPermanently()
+{
+	Super::OnMoveFailedPermanently();
+
+	if (!CurrentAssignment.TargetZoneOwner.IsValid())
+	{
+		// 대기실 이동 등 CurrentAssignment와 무관한 이동 실패 — 정리할 존/배정이 없다.
+		SetState(EAgentState::Idle);
+		return;
+	}
+
+	// 버그 수정 — 목적지가 근본적으로 도달 불가능하면(레벨 지오메트리 등) 로봇이 CurrentAssignment를
+	// 영원히 붙든 채 Moving에 멈춰 함대에서 영구 이탈했다. 존을 반납하고 Idle로 복귀시켜 최소한 이 로봇
+	// 자체는 다른 작업을 계속 받게 한다. 실패한 배정 자체는 자동 재큐잉하지 않는다 — 같은 지점이 원인이면
+	// 다음 로봇도 똑같이 실패해 함대 전체가 연쇄적으로 멈출 수 있다. 대신 로그로 레벨 점검이 필요함을 알린다.
+	// 버그 수정(사용자 지시) — 자동 재큐잉은 없다고 위에 적어놨었지만, 회피가 막히는 지점에서 배정이
+	// 조용히 죽어 사이클 전체가 멈추는 빈도가 테스트를 막을 정도로 잦아 재큐잉을 추가한다. 근본 원인
+	// (정지 에이전트+선반 사이 회피 국소최소)은 별도로 다룬다 — 같은 지점이 계속 막히면 다음 아틀라스도
+	// 반복 실패할 수 있다는 트레이드오프는 감수.
+	UE_LOG(LogFactoryDispatch, Error, TEXT("[%s] 목적지 도달 불가로 배정(%s, 대상=%s)을 포기 — 레벨 NavMesh/지오메트리 또는 혼잡 점검 필요. 재큐잉함"),
+		*GetName(), *CurrentAssignment.AssignmentID.ToString(),
+		CurrentAssignment.TargetZoneOwner.IsValid() ? *CurrentAssignment.TargetZoneOwner->GetName() : TEXT("Invalid"));
+
+	if (AStorageShelf* Shelf = Cast<AStorageShelf>(CurrentAssignment.TargetZoneOwner.Get()))
+	{
+		if (CurrentAssignment.ZoneType == EWorkZoneType::ShelfInboundZone)
+		{
+			Shelf->ReleaseInboundZone(this);
+		}
+		else if (CurrentAssignment.ZoneType == EWorkZoneType::ShelfOutboundZone)
+		{
+			Shelf->ReleaseOutboundZone(this);
+		}
+	}
+	else if (AHorizontalTray* Tray = Cast<AHorizontalTray>(CurrentAssignment.TargetZoneOwner.Get()))
+	{
+		Tray->ReleaseWorkZone();
+	}
+
+	UOutboundDispatchSubsystem* Dispatch = GetWorld() ? GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>() : nullptr;
+	if (Dispatch)
+	{
+		// ActiveStationAssignments에 남아있는 원본 항목을 제거(AssignedAtlas가 이 로봇을 가리킨 채
+		// 방치되면 영원히 아무도 못 건드리는 유령 배정이 된다).
+		Dispatch->OnStationAssignmentCompleted(CurrentAssignment.AssignmentID);
+
+		// PendingSlotReservation은 PopNextReservedSlot이 ReservedSlots에서 이미 꺼내온 "진행 중이던"
+		// 슬롯이라 CurrentAssignment.ReservedSlots엔 더 이상 없다 — 재큐잉 전에 앞쪽에 되돌려 놔야
+		// 이 슬롯(이미 물리적으로 예약된 재고 슬롯)이 유실되지 않는다.
+		FStationAssignment RequeueTarget = CurrentAssignment;
+		if (PendingSlotReservation.bIsValid)
+		{
+			FReservedSlotEntry RestoredEntry;
+			RestoredEntry.SlotCoord = FIntPoint(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex);
+			RestoredEntry.TripTaskID = PendingSlotReservation.TripTaskID;
+			RequeueTarget.ReservedSlots.Insert(RestoredEntry, 0);
+		}
+		Dispatch->RequeueStationAssignment(RequeueTarget);
+	}
+
+	CurrentAssignment = FStationAssignment();
+	PendingSlotReservation = FPendingSlotReservation();
+	SetState(EAgentState::Idle);
+
+	// 버그 수정 — 방금 재큐잉한 배정을 이 스윕이 같은(방금 실패한) 아틀라스에게 그 자리에서 다시 쥐어줄
+	// 수 있다. 동기 호출 그대로 두면 StartCurrentAssignment→이동 실패가 같은 콜스택 안에서 곧장
+	// OnMoveFailedPermanently를 다시 불러 재귀로 이어질 위험이 있다(재현된 스택 오버플로우의 직접 원인 —
+	// MoveFailureRetryCount 리셋 누락과 결합해 실제로 터짐). EnqueueInboundWork와 동일하게 다음 틱으로 미룬다.
+	if (Dispatch)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateUObject(Dispatch, &UOutboundDispatchSubsystem::TryDispatchIdleAgents));
+		}
+	}
+}
+
 void AFactoryAtlasRobot::OnWorkingTick(float DeltaTime)
 {
 	Super::OnWorkingTick(DeltaTime);
@@ -396,6 +486,9 @@ void AFactoryAtlasRobot::OnWorkingTick(float DeltaTime)
 
 void AFactoryAtlasRobot::StartCurrentAssignment()
 {
+	// 새로 시작하는 시도이므로, 이전에 걸려있던 재시도 타이머(경합 대기)가 있으면 대체한다.
+	GetWorldTimerManager().ClearTimer(StartAssignmentRetryTimerHandle);
+
 	AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController());
 	if (!AIController)
 	{
@@ -403,11 +496,24 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 		return;
 	}
 
+	// 버그 수정 — 아래 존 점유 재시도 분기들이 SetState(Moving)보다 먼저 return해서, 방금 배정받은
+	// 아틀라스가 첫 시도에서 하필 존이 점유 중이면 CurrentAssignment는 이미 찼는데 CurrentState는
+	// Idle에 그대로 머물렀다. 자체 재시도 타이머(StartAssignmentRetryTimerHandle)는 이 아틀라스 본인의
+	// 재시도는 보장하지만, 그 사이 배차 스윕이 "아직 유휴"로 오판해 이 아틀라스에게 다른 배정을
+	// 또 시도하는 것까지는 막지 못한다(TryAssignIdleAtlas의 이중배정 방어에 걸려 거부되긴 하지만, 배송
+	// 로봇 쪽과 동일한 근본 원인). 배정 시작 시도 자체가 시작되는 즉시 Moving으로 반영해 이 틈을 없앤다.
+	SetState(EAgentState::Moving);
+
 	if (AHorizontalTray* Tray = Cast<AHorizontalTray>(CurrentAssignment.TargetZoneOwner.Get()))
 	{
 		if (!Tray->TryReserveWorkZone(this))
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — %s의 WorkZone 예약 실패(다른 아틀라스가 점유 중). CurrentAssignment가 시작되지 못하고 방치됨"), *GetName(), *Tray->GetName());
+			// 버그 수정 — 예전엔 여기서 그냥 포기해 CurrentAssignment가 시작도 못 하고 영구 방치됐다
+			// (CurrentState가 Idle에 머물러 배차 스윕에서도 이미 배정된 것으로 보여 재시도가 없었음).
+			// 점유 중인 아틀라스가 끝날 때까지 같은 간격으로 재시도한다.
+			UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] StartCurrentAssignment 대기 — %s의 WorkZone이 다른 아틀라스 점유 중, %.1f초 후 재시도"),
+				*GetName(), *Tray->GetName(), ZoneRetryIntervalSeconds);
+			GetWorldTimerManager().SetTimer(StartAssignmentRetryTimerHandle, this, &AFactoryAtlasRobot::StartCurrentAssignment, ZoneRetryIntervalSeconds, false);
 			return;
 		}
 
@@ -420,8 +526,12 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 			return;
 		}
 
-		SetState(EAgentState::Moving);
-		AIController->RequestMoveWithFilter(Tray->GetAtlasWorkLocation());
+		// 버그 수정(사용자 지시) — 여기가 예전부터 그래프를 아예 안 타는 순수 직행이었다(트레이는 마커까지
+		// 거리가 짧다는 전제로 자유 이동만 써옴). 아틀라스가 Inbound/Outbound 웨이포인트를 쓸 수 있게 된
+		// 이상 선반과 동일하게 그래프를 태워야 한다 — 안 그러면 정작 트래픽이 가장 몰리는 트레이 접근이
+		// 이번 회피 재설계의 보호를 하나도 못 받는다.
+		IgnoreTransportRobotForCurrentTrip(AIController);
+		TryRequestWaypointRoute(nullptr, Tray->GetAtlasWorkLocation());
 		return;
 	}
 
@@ -436,8 +546,10 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 	const bool bZoneReserved = bEmit ? Shelf->TryReserveOutboundZone(this) : Shelf->TryReserveInboundZone(this);
 	if (!bZoneReserved)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — %s의 %s 예약 실패(다른 아틀라스가 점유 중). CurrentAssignment가 시작되지 못하고 방치됨"),
-			*GetName(), *Shelf->GetName(), bEmit ? TEXT("OutboundZone") : TEXT("InboundZone"));
+		// 버그 수정 — Tray 분기와 동일한 이유로 재시도 추가(방치되면 CurrentAssignment가 영구 미아가 됨).
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] StartCurrentAssignment 대기 — %s의 %s이 만석, %.1f초 후 재시도"),
+			*GetName(), *Shelf->GetName(), bEmit ? TEXT("OutboundZone") : TEXT("InboundZone"), ZoneRetryIntervalSeconds);
+		GetWorldTimerManager().SetTimer(StartAssignmentRetryTimerHandle, this, &AFactoryAtlasRobot::StartCurrentAssignment, ZoneRetryIntervalSeconds, false);
 		return;
 	}
 
@@ -448,19 +560,24 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — %s에 ReservedSlots가 비어있음(생성 시점 예약 로직 확인 필요)"), *GetName(), *Shelf->GetName());
 		if (bEmit)
 		{
-			Shelf->ReleaseOutboundZone();
+			Shelf->ReleaseOutboundZone(this);
 		}
 		else
 		{
-			Shelf->ReleaseInboundZone();
+			Shelf->ReleaseInboundZone(this);
 		}
 		return;
 	}
 
 	const FVector Destination = Shelf->GetAtlasWorkLocation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, CurrentAssignment.ZoneType);
 
-	SetState(EAgentState::Moving);
-	AIController->RequestMoveWithFilter(Destination);
+	IgnoreTransportRobotForCurrentTrip(AIController);
+
+	// 버그 수정 — Docs/08_Navigation.md §8-B: 공용 백본으로 구역 경계까지 접근한 뒤 자유 이동(§8-A)으로
+	// 전환해야 하는데, 이 웨이포인트 요청 자체가 빠져 있어 대기실/공용 웨이포인트를 무시하고 항상 마커로
+	// 직행했다. 구역마다 사람이 미리 지정해둔 고정 진입 웨이포인트 대신, 목표 마커(Destination)에 가장
+	// 가깝고 실제로 도달 가능한 웨이포인트를 매번 동적으로 찾는다.
+	TryRequestWaypointRoute(nullptr, Destination);
 }
 
 AFactoryTransportRobot* AFactoryAtlasRobot::FindWaitingTransportRobot(const FGuid& TripTaskID, bool bNeedsPayload) const
@@ -508,6 +625,136 @@ AFactoryTransportRobot* AFactoryAtlasRobot::FindWaitingTransportRobot(const FGui
 	return nullptr;
 }
 
+AFactoryTransportRobot* AFactoryAtlasRobot::FindTransportRobotForTrip(const FGuid& TripTaskID) const
+{
+	if (!TripTaskID.IsValid())
+	{
+		return nullptr;
+	}
+
+	TArray<AActor*> FoundRobots;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AFactoryTransportRobot::StaticClass(), FoundRobots);
+	for (AActor* Actor : FoundRobots)
+	{
+		AFactoryTransportRobot* Robot = Cast<AFactoryTransportRobot>(Actor);
+		if (Robot && Robot->CurrentTask.TaskID == TripTaskID)
+		{
+			return Robot;
+		}
+	}
+
+	return nullptr;
+}
+
+AFactoryAgentBase* AFactoryAtlasRobot::GetCurrentTripPartner() const
+{
+	if (!PendingSlotReservation.bIsValid)
+	{
+		return nullptr;
+	}
+	return FindTransportRobotForTrip(PendingSlotReservation.TripTaskID);
+}
+
+bool AFactoryAtlasRobot::TryHandleFinalHopBrokenBlock(AFactoryAgentBase* BrokenAgent)
+{
+	AStorageShelf* Shelf = Cast<AStorageShelf>(CurrentAssignment.TargetZoneOwner.Get());
+	if (!Shelf || !PendingSlotReservation.bIsValid)
+	{
+		// 선반 접근이 아니거나(트레이 등, 대안 칸 개념이 없음) 진행 중인 슬롯 정보가 없음 — 기본 Pause로 처리.
+		return false;
+	}
+
+	const bool bWasInbound = (CurrentAssignment.ZoneType == EWorkZoneType::ShelfInboundZone);
+	int32 NewFloorIndex = 0;
+	int32 NewSlotIndex = 0;
+	ALogisticsItem* UnusedItem = nullptr;
+
+	// 버그 수정(사용자 지시) — 반드시 대체 칸을 먼저 확보한 뒤에만 원래 칸을 반납한다. 순서를 바꾸면
+	// (반납부터) 그 사이 다른 입고 작업이 이 칸을 채가서 결국 대체 칸도, 원래 칸도 잃을 수 있다.
+	const bool bFoundAlternative = bWasInbound
+		? Shelf->TryReserveEmptySlot(NewFloorIndex, NewSlotIndex)
+		: Shelf->TryReserveOldestOccupiedSlot(NewFloorIndex, NewSlotIndex, UnusedItem);
+
+	if (!bFoundAlternative)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 선반(%s) 정비 중인 NPC(%s)가 접근을 막았지만 대체 칸이 없음 — 수리 종료까지 대기"),
+			*GetName(), *Shelf->GetName(), *BrokenAgent->GetName());
+		return false;
+	}
+
+	UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 선반(%s) 정비 중인 NPC(%s)가 (Floor=%d,Slot=%d) 접근을 막아 (Floor=%d,Slot=%d)로 재할당"),
+		*GetName(), *Shelf->GetName(), *BrokenAgent->GetName(), PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, NewFloorIndex, NewSlotIndex);
+
+	Shelf->ReleaseSlotReservation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, bWasInbound);
+
+	// 짝 배송로봇도 같은 트립이니 물리적으로 같은 칸에서 만나야 핸드오프가 성립한다 — 같이 갱신.
+	if (AFactoryTransportRobot* Partner = FindTransportRobotForTrip(PendingSlotReservation.TripTaskID))
+	{
+		Partner->RetargetCurrentTaskSlot(NewFloorIndex, NewSlotIndex);
+	}
+
+	// 이번에 막힌 슬롯만 새 좌표로 바꿔 맨 앞에 다시 끼워넣는다 — CurrentAssignment.ReservedSlots엔
+	// PopNextReservedSlot이 이미 이번 트립을 꺼내간 뒤라 "아직 손 안 댄 미래 트립들"만 남아있으므로,
+	// 그건 그대로 보존해야 한다(다중 트립 배정 도중이면 나머지 트립을 잃으면 안 됨).
+	FStationAssignment RequeueTarget = CurrentAssignment;
+	FReservedSlotEntry NewEntry;
+	NewEntry.SlotCoord = FIntPoint(NewFloorIndex, NewSlotIndex);
+	NewEntry.TripTaskID = PendingSlotReservation.TripTaskID;
+	RequeueTarget.ReservedSlots.Insert(NewEntry, 0);
+
+	UOutboundDispatchSubsystem* Dispatch = GetWorld() ? GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>() : nullptr;
+	if (Dispatch)
+	{
+		// ActiveStationAssignments에 남아있는 원본 항목을 제거(방치되면 유령 배정이 된다) — 재큐잉이
+		// 그 자리를 새 AssignmentID로 대신한다.
+		Dispatch->OnStationAssignmentCompleted(CurrentAssignment.AssignmentID);
+		Dispatch->RequeueStationAssignment(RequeueTarget);
+	}
+
+	AbandonAnyActiveWaypointRoute();
+	CurrentAssignment = FStationAssignment();
+	PendingSlotReservation = FPendingSlotReservation();
+	SetState(EAgentState::Idle);
+
+	// 버그 수정 — 방금 재큐잉한 배정을 같은 콜스택 안에서 동기적으로 다시 스윕하면(과거 실제 재현된
+	// 스택 오버플로우와 동일 구조) 위험하다. 다음 틱으로 미룬다.
+	if (Dispatch)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateUObject(Dispatch, &UOutboundDispatchSubsystem::TryDispatchIdleAgents));
+		}
+	}
+
+	return true;
+}
+
+void AFactoryAtlasRobot::IgnoreTransportRobotForCurrentTrip(AFactoryAIController* AIController)
+{
+	if (!AIController || !PendingSlotReservation.bIsValid)
+	{
+		return;
+	}
+
+	if (AFactoryTransportRobot* Robot = FindTransportRobotForTrip(PendingSlotReservation.TripTaskID))
+	{
+		AIController->SetAvoidanceIgnoreActor(Robot, true);
+	}
+}
+
+void AFactoryAtlasRobot::ClearTransportRobotIgnore(AFactoryTransportRobot* Robot)
+{
+	if (!Robot)
+	{
+		return;
+	}
+
+	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+	{
+		AIController->SetAvoidanceIgnoreActor(Robot, false);
+	}
+}
+
 void AFactoryAtlasRobot::ContinueShelfAssignment()
 {
 	// 버그 수정 — 아틀라스와 배송로봇은 별도 스테이징 지점이 아니라 슬롯의 (X,Y) 위치에서 직접 만난다.
@@ -545,6 +792,7 @@ void AFactoryAtlasRobot::ContinueShelfAssignment()
 		{
 			return;
 		}
+		ClearTransportRobotIgnore(Robot);
 	}
 	else // receive (ShelfInboundZone)
 	{
@@ -560,6 +808,7 @@ void AFactoryAtlasRobot::ContinueShelfAssignment()
 			{
 				return;
 			}
+			ClearTransportRobotIgnore(Robot);
 		}
 
 		if (!TransferItem(nullptr, Shelf))
@@ -571,8 +820,17 @@ void AFactoryAtlasRobot::ContinueShelfAssignment()
 	// 이번 슬롯의 leg 완료 — 남은 슬롯이 있으면 그 위치로, 없으면(RemainingCount<=0) 배정 종료.
 	if (CurrentAssignment.RemainingCount > 0 && PopNextReservedSlot())
 	{
+		// 버그 수정(사용자 리포트) — 같은 배정 안에서 다음 슬롯으로 넘어가는 이 지점이 예전부터
+		// RequestMoveWithFilter로 그래프를 아예 안 타는 순수 직행이었다(같은 선반이라 거리가 짧다는
+		// 전제). 두 슬롯이 선반 위에서 멀리 떨어져 있으면(다른 층/칸) 근처 웨이포인트를 무시하고
+		// 목표 슬롯 근처로 곧장 이동하는 것처럼 보였다 — StartCurrentAssignment와 동일하게
+		// TryRequestWaypointRoute로 통일. SetState(Moving)도 StartCurrentAssignment와 동일하게 호출
+		// 전에 미리 반영 — TryRequestWaypointRoute는 실패(경로 없음/첫 홉 예약 경합) 분기에서 상태를
+		// 안 건드리므로, 여기서 먼저 안 해두면 재시도 대기 중에 CurrentState가 Working에 눌러붙어
+		// OnWorkingTick이 계속 ContinueShelfAssignment를 불러 PopNextReservedSlot을 중복 호출한다.
+		IgnoreTransportRobotForCurrentTrip(AIController);
 		SetState(EAgentState::Moving);
-		AIController->RequestMoveWithFilter(Shelf->GetAtlasWorkLocation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, CurrentAssignment.ZoneType));
+		TryRequestWaypointRoute(nullptr, Shelf->GetAtlasWorkLocation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, CurrentAssignment.ZoneType));
 	}
 	else
 	{
@@ -619,6 +877,7 @@ void AFactoryAtlasRobot::ContinueTrayAssignment()
 		{
 			return;
 		}
+		ClearTransportRobotIgnore(Robot);
 	}
 	else
 	{
@@ -634,6 +893,7 @@ void AFactoryAtlasRobot::ContinueTrayAssignment()
 			{
 				return;
 			}
+			ClearTransportRobotIgnore(Robot);
 		}
 
 		if (!TransferItem(nullptr, Tray))
@@ -646,6 +906,10 @@ void AFactoryAtlasRobot::ContinueTrayAssignment()
 	// TripTaskID만 꺼내고 위치는 그대로 머문다(Tray는 슬롯 이동이 없음). 없으면 배정을 종료한다.
 	if (CurrentAssignment.RemainingCount > 0 && PopNextReservedSlot())
 	{
+		if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
+		{
+			IgnoreTransportRobotForCurrentTrip(AIController);
+		}
 		return;
 	}
 
@@ -658,11 +922,11 @@ void AFactoryAtlasRobot::OnAssignmentExhausted()
 	{
 		if (CurrentAssignment.ZoneType == EWorkZoneType::ShelfInboundZone)
 		{
-			Shelf->ReleaseInboundZone();
+			Shelf->ReleaseInboundZone(this);
 		}
 		else if (CurrentAssignment.ZoneType == EWorkZoneType::ShelfOutboundZone)
 		{
-			Shelf->ReleaseOutboundZone();
+			Shelf->ReleaseOutboundZone(this);
 		}
 	}
 	else if (AHorizontalTray* Tray = Cast<AHorizontalTray>(CurrentAssignment.TargetZoneOwner.Get()))
@@ -694,7 +958,7 @@ void AFactoryAtlasRobot::OnAssignmentExhausted()
 
 void AFactoryAtlasRobot::OnTaskCompleted()
 {
-	++OperationCount;
+	OperationCount += OperationCountPerTask;
 
 	if (OperationCount < MaintenanceThreshold)
 	{

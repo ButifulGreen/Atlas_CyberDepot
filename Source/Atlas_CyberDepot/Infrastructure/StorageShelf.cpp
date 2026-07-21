@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Infrastructure/StorageShelf.h"
+#include "Atlas_CyberDepot.h"
 #include "Infrastructure/LogisticsItem.h"
 #include "Agent/FactoryAgentBase.h"
 #include "Net/UnrealNetwork.h"
@@ -89,34 +90,58 @@ int32 AStorageShelf::ToSlotArrayIndex(int32 FloorIndex, int32 SlotIndex)
 
 bool AStorageShelf::TryReserveInboundZone(AFactoryAgentBase* Atlas)
 {
-	if (!Atlas || InboundZoneOccupant.IsValid())
+	if (!Atlas)
 	{
 		return false;
 	}
 
-	InboundZoneOccupant = Atlas;
+	if (InboundZoneOccupants.Num() >= MaxConcurrentAtlas)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s InboundZone 예약 실패 — %s 만석(%d/%d)"),
+			*Atlas->GetName(), *GetName(), InboundZoneOccupants.Num(), MaxConcurrentAtlas);
+		return false;
+	}
+
+	InboundZoneOccupants.Add(Atlas);
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s InboundZone 예약 성공 — %s(%d/%d)"),
+		*Atlas->GetName(), *GetName(), InboundZoneOccupants.Num(), MaxConcurrentAtlas);
 	return true;
 }
 
-void AStorageShelf::ReleaseInboundZone()
+void AStorageShelf::ReleaseInboundZone(AFactoryAgentBase* Atlas)
 {
-	InboundZoneOccupant.Reset();
+	InboundZoneOccupants.RemoveAll([Atlas](const TWeakObjectPtr<AFactoryAgentBase>& Occupant)
+	{
+		return !Occupant.IsValid() || Occupant.Get() == Atlas;
+	});
 }
 
 bool AStorageShelf::TryReserveOutboundZone(AFactoryAgentBase* Atlas)
 {
-	if (!Atlas || OutboundZoneOccupant.IsValid())
+	if (!Atlas)
 	{
 		return false;
 	}
 
-	OutboundZoneOccupant = Atlas;
+	if (OutboundZoneOccupants.Num() >= MaxConcurrentAtlas)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s OutboundZone 예약 실패 — %s 만석(%d/%d)"),
+			*Atlas->GetName(), *GetName(), OutboundZoneOccupants.Num(), MaxConcurrentAtlas);
+		return false;
+	}
+
+	OutboundZoneOccupants.Add(Atlas);
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s OutboundZone 예약 성공 — %s(%d/%d)"),
+		*Atlas->GetName(), *GetName(), OutboundZoneOccupants.Num(), MaxConcurrentAtlas);
 	return true;
 }
 
-void AStorageShelf::ReleaseOutboundZone()
+void AStorageShelf::ReleaseOutboundZone(AFactoryAgentBase* Atlas)
 {
-	OutboundZoneOccupant.Reset();
+	OutboundZoneOccupants.RemoveAll([Atlas](const TWeakObjectPtr<AFactoryAgentBase>& Occupant)
+	{
+		return !Occupant.IsValid() || Occupant.Get() == Atlas;
+	});
 }
 
 bool AStorageShelf::TryReserveEmptySlot(int32& OutFloorIndex, int32& OutSlotIndex)
@@ -183,6 +208,19 @@ void AStorageShelf::ConfirmOutboundRemoved(int32 FloorIndex, int32 SlotIndex)
 	Slot.bReservedForOutbound = false;
 }
 
+void AStorageShelf::ReleaseSlotReservation(int32 FloorIndex, int32 SlotIndex, bool bWasInbound)
+{
+	FShelfSlot& Slot = Slots[ToSlotArrayIndex(FloorIndex, SlotIndex)];
+	if (bWasInbound)
+	{
+		Slot.bReservedForInbound = false;
+	}
+	else
+	{
+		Slot.bReservedForOutbound = false;
+	}
+}
+
 ALogisticsItem* AStorageShelf::GetItemAt(int32 FloorIndex, int32 SlotIndex) const
 {
 	const int32 ArrayIndex = ToSlotArrayIndex(FloorIndex, SlotIndex);
@@ -209,23 +247,35 @@ int32 AStorageShelf::GetOccupiedCount() const
 
 void AStorageShelf::TransferZoneOccupancy(EWorkZoneType ZoneType, AFactoryAgentBase* From, AFactoryAgentBase* To)
 {
-	TWeakObjectPtr<AFactoryAgentBase>* TargetOccupant = nullptr;
+	TArray<TWeakObjectPtr<AFactoryAgentBase>>* TargetOccupants = nullptr;
 	switch (ZoneType)
 	{
 	case EWorkZoneType::ShelfInboundZone:
-		TargetOccupant = &InboundZoneOccupant;
+		TargetOccupants = &InboundZoneOccupants;
 		break;
 	case EWorkZoneType::ShelfOutboundZone:
-		TargetOccupant = &OutboundZoneOccupant;
+		TargetOccupants = &OutboundZoneOccupants;
 		break;
 	default:
 		return;
 	}
 
-	if (TargetOccupant->Get() == From)
+	for (TWeakObjectPtr<AFactoryAgentBase>& Occupant : *TargetOccupants)
 	{
-		*TargetOccupant = To;
+		if (Occupant.Get() == From)
+		{
+			Occupant = To;
+			return;
+		}
 	}
+}
+
+bool AStorageShelf::IsZoneFull(EWorkZoneType ZoneType) const
+{
+	const int32 OccupantCount = (ZoneType == EWorkZoneType::ShelfInboundZone)
+		? InboundZoneOccupants.Num()
+		: OutboundZoneOccupants.Num();
+	return OccupantCount >= MaxConcurrentAtlas;
 }
 
 void AStorageShelf::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -233,6 +283,6 @@ void AStorageShelf::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AStorageShelf, Slots);
-	DOREPLIFETIME(AStorageShelf, InboundZoneOccupant);
-	DOREPLIFETIME(AStorageShelf, OutboundZoneOccupant);
+	DOREPLIFETIME(AStorageShelf, InboundZoneOccupants);
+	DOREPLIFETIME(AStorageShelf, OutboundZoneOccupants);
 }

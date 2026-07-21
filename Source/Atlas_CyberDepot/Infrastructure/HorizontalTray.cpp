@@ -25,21 +25,23 @@ void AHorizontalTray::BeginPlay()
 	Super::BeginPlay();
 }
 
-FVector AHorizontalTray::ComputeWorkLocation(float DepthOffset) const
+FVector AHorizontalTray::ComputeWorkLocation(float DepthOffset, float LateralOffset) const
 {
 	// 버그 수정 — 아틀라스/배송로봇이 실제로 물품과 상호작용하는 지점은 항상 ItemEndMarker다
 	// (Inbound는 여기서 집고, Outbound는 여기에 놓는다 — OnItemPlacedByAtlas 참고).
-	return ItemEndMarker->GetComponentLocation() + GetActorForwardVector() * DepthOffset;
+	return ItemEndMarker->GetComponentLocation()
+		+ GetActorForwardVector() * DepthOffset
+		+ GetActorRightVector() * LateralOffset;
 }
 
 FVector AHorizontalTray::GetAtlasWorkLocation() const
 {
-	return ComputeWorkLocation(AtlasWorkDistance);
+	return ComputeWorkLocation(AtlasWorkDistance, AtlasWorkLateralOffset);
 }
 
 FVector AHorizontalTray::GetTransportRobotWorkLocation() const
 {
-	return ComputeWorkLocation(TransportRobotWorkDistance);
+	return ComputeWorkLocation(TransportRobotWorkDistance, TransportRobotWorkLateralOffset);
 }
 
 void AHorizontalTray::Tick(float DeltaTime)
@@ -62,6 +64,22 @@ bool AHorizontalTray::TryReserveWorkZone(AFactoryAgentBase* Agent)
 void AHorizontalTray::ReleaseWorkZone()
 {
 	WorkZoneOccupant.Reset();
+}
+
+bool AHorizontalTray::TryReserveTransportRobotWorkZone(AFactoryAgentBase* Agent)
+{
+	if (!Agent || TransportRobotWorkZoneOccupant.IsValid())
+	{
+		return false;
+	}
+
+	TransportRobotWorkZoneOccupant = Agent;
+	return true;
+}
+
+void AHorizontalTray::ReleaseTransportRobotWorkZone()
+{
+	TransportRobotWorkZoneOccupant.Reset();
 }
 
 void AHorizontalTray::OnItemSpawnedAtStart(ALogisticsItem* Item)
@@ -130,4 +148,5 @@ void AHorizontalTray::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AHorizontalTray, CurrentItem);
 	DOREPLIFETIME(AHorizontalTray, bIsHaltedAtEnd);
 	DOREPLIFETIME(AHorizontalTray, WorkZoneOccupant);
+	DOREPLIFETIME(AHorizontalTray, TransportRobotWorkZoneOccupant);
 }
