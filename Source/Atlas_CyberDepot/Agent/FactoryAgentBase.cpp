@@ -36,6 +36,7 @@ void AFactoryAgentBase::Tick(float DeltaTime)
 	if (!HasAuthority() || (CurrentState != EAgentState::Moving && CurrentState != EAgentState::Pause))
 	{
 		BlockedTimer = 0.f;
+		LastBlockedRecoveryAttemptSeconds = 0.f;
 		return;
 	}
 
@@ -47,6 +48,7 @@ void AFactoryAgentBase::Tick(float DeltaTime)
 			OnUnblocked();
 		}
 		BlockedTimer = 0.f;
+		LastBlockedRecoveryAttemptSeconds = 0.f;
 		return;
 	}
 
@@ -54,6 +56,26 @@ void AFactoryAgentBase::Tick(float DeltaTime)
 	if (BlockedTimer >= BlockedThresholdSeconds)
 	{
 		OnBlockedTick(DeltaTime);
+
+		// 버그 수정(사용자 요청, 대비책) — 그래프 구간/FinalHop 안전 트레이스 둘 다 AFactoryAgentBase
+		// 파생 액터만 감지 대상이라(Cast 실패 시 그냥 무시), 선반 같은 정적 지오메트리에 막히면 아무
+		// 것도 감지되지 않아 Pause도 안 걸리고 영구 정지할 수 있다. Pause(대기+재확인, 자체 타임아웃 로직
+		// 보유)는 제외하고 — 겉으로 "이동 중"이라면서 실제로는 BlockedThresholdSeconds 넘게 안 움직인
+		// 경우만, 원인을 가리지 않고 이 간격으로 주기적으로 강제 재탐색을 시도한다. 근본 원인 진단 없이
+		// 넣는 최후의 안전망이다.
+		// 버그 수정(사용자 지시) — Waitbound 대기(bAwaitingWaitboundClearance)와 다음 홉 재시도 대기
+		// (bIsWaitingForNextHopReservation)는 스스로 무기한 재시도하는 정상적인 대기 상태인데, 이
+		// 안전망이 2초마다 끼어들어 강제로 재탐색을 시켜버리면 그 두 메커니즘이 지키려던 "같은 자리에서
+		// 계속 기다리기"가 깨지고 엉뚱한 노드로 튀는 문제가 재발한다(혼잡 구간에서 실제 재현) — 둘 다
+		// 제외한다.
+		if (CurrentState == EAgentState::Moving && !bAwaitingWaitboundClearance && !bIsWaitingForNextHopReservation &&
+			BlockedTimer - LastBlockedRecoveryAttemptSeconds >= BlockedRecoveryRetryIntervalSeconds)
+		{
+			LastBlockedRecoveryAttemptSeconds = BlockedTimer;
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Nav] %s %.1f초 이상 정지 감지(정적 장애물 등 트레이스로 못 잡는 경우 대비) — 강제 재탐색"),
+				*GetName(), BlockedTimer);
+			AbandonWaypointRouteAndReroute();
+		}
 	}
 }
 

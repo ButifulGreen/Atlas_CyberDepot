@@ -58,6 +58,13 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 	float BlockedTimer = 0.f;
 
+	// 버그 수정(사용자 요청, 대비책) — 그래프 구간/FinalHop 안전 트레이스 둘 다 AFactoryAgentBase 파생
+	// 액터만 감지 대상이라, 선반 같은 정적 지오메트리에 막히면 Pause조차 안 걸리고 영구 정지할 수 있다
+	// (원인 특정 전 최후의 안전망 — Tick 참고). CurrentState==Moving인데 BlockedThresholdSeconds 넘게
+	// 안 움직이면 이 간격으로 원인을 가리지 않고 강제 재탐색을 반복 시도한다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Navigation")
+	float BlockedRecoveryRetryIntervalSeconds = 2.f;
+
 	// Docs/04_Agent_AI.md IsEligibleForQuickCheck()이 참조하지만 어디에도 멤버로 정의돼 있지 않아
 	// 5단계에서 추가 — AIdleWaitingZone::TryReserveSlot/ReleaseSlot이 갱신한다.
 	UPROPERTY(BlueprintReadOnly)
@@ -214,6 +221,10 @@ protected:
 	virtual void OnRep_CurrentState();
 
 private:
+	// Tick의 BlockedRecoveryRetryIntervalSeconds 판정용 — 마지막으로 강제 재탐색을 시도했던 시점의
+	// BlockedTimer 값(BlockedTimer 자체는 계속 누적되므로, 이 값과의 차이로 다음 재시도 시점을 판단).
+	float LastBlockedRecoveryAttemptSeconds = 0.f;
+
 	// 버그 수정(사용자 지시) — 그래프 중간 홉 예약이 경합으로 실패하면 예전엔 곧장 전체 재탐색을 했는데,
 	// 그러면 지금 막힌 노드 하나 때문에 경로 전체를 다시 짜면서 엉뚱하게 먼 후보로 빠질 위험이 있었다
 	// (실제 재현). 대신 원래 계획했던 같은 노드를 그대로 둔 채 이 자리에서 기다렸다가 같은 노드 예약만

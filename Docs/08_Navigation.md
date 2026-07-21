@@ -118,5 +118,10 @@
   4. 이 아틀라스 자신의 배정은 막힌 슬롯만 새 좌표로 바꿔 다시 큐에 넣고(`UOutboundDispatchSubsystem::RequeueStationAssignment` 재사용 — 다중 트립 배정 중이면 아직 안 건드린 미래 트립은 그대로 보존), 자신은 Idle로 돌아가 통상적인 배차 스윕에 다시 맡긴다 — 마침 더 가까이 있는 다른 유휴 아틀라스가 새 칸을 대신 가져갈 수도 있다(효율화는 새 로직이 아니라 기존 배차 스윕의 자연스러운 결과).
 - 두 트레이스 모두 감지 시 `FAnomalyEvent`를 `Code:002`(세이프티존 침범)로 `UFactoryEventBusSubsystem::PublishAnomaly` 발행(`01_EventBus_DataPipeline.md` 참고).
 
+**최후의 안전망 — 정적 지오메트리 정지 감지 (`AFactoryAgentBase::Tick`, 사용자 요청, 대비책)**: 위 두 트레이스는 히트/오버랩된 액터를 `Cast<AFactoryAgentBase>`로 판정하므로, 선반처럼 **정적 지오메트리에 막히면 아예 감지가 안 되고 `Pause`조차 안 걸린 채 영구 정지**할 수 있다(원인 특정 없이도 대비만 해두는 안전망 — 왜 막혔는지는 알려주지 않는다).
+- 기존 `BlockedTimer`(속도 0인 채 `BlockedThresholdSeconds`=2초 넘게 지속되면 누적, `Tick`이 이미 관리하던 값)를 재사용. `CurrentState == Moving`(자체 타임아웃 로직이 있는 `Pause`는 제외)일 때만, `BlockedRecoveryRetryIntervalSeconds`(기본 2초, 에디터 조정 가능) 간격으로 원인을 가리지 않고 주기적으로 `AbandonWaypointRouteAndReroute()`를 강제 호출한다.
+- 버그 수정 — `AbandonWaypointRouteAndReroute()`는 원래 `TravelPhase==TraversingGraph`(그래프 구간)에서만 동작했다. FinalHop 중 정적 장애물에 막히는 경우(이번 안전망이 노리는 바로 그 케이스)는 처리 대상이 아니었어서, FinalHop도 포함하도록 확장했다 — FinalHop이었으면 그래프 마지막 노드 참조 없이 `TryRequestWaypointRoute(nullptr, PendingFinalHopTarget)`로 마커 좌표 기준 처음부터 동적 재탐색한다.
+- **버그 수정(사용자 리포트)** — 이 안전망이 "왜 정지했는지" 구분을 안 해서, 스스로 무기한 재시도하는 정상적인 대기 상태(`bAwaitingWaitboundClearance`, 다음 홉 재시도 `bIsWaitingForNextHopReservation` — 둘 다 `CurrentState`는 `Moving`인 채로 속도만 0)까지 2초 뒤에 강제로 깨버렸다. 그 결과 혼잡한 구간(공용 웨이포인트 병목 등)에서 다음 홉 재시도가 몇 초만 걸려도 이 안전망이 끼어들어 전체 재탐색을 시켜버려, 정작 "같은 노드를 그대로 기다리기" 수정이 막으려던 엉뚱한 노드 점프가 재발했다(실제 재현). 두 대기 플래그가 켜져 있는 동안은 이 안전망이 개입하지 않도록 조건에서 제외했다 — 두 메커니즘 모두 이미 자체적으로 무기한 재시도하므로 안전망이 불필요하고, 오히려 방해가 됐다.
+
 ### 리플리케이션
 이 레이어에서 추가되는 모든 상태(웨이포인트 점유자, 경로 진행 인덱스, Pause 누적 시간)는 리플리케이트하지 않는다 — `CurrentAssignment`/`HomeIdleZone`과 동일한 근거로 서버 전용 부기 값이며, `CurrentState`(`Pause` 포함, 기존 `EAgentState`가 이미 리플리케이트됨)/위치(기본 이동 복제)만으로 클라이언트 렌더링에 충분하다. `AStorageShelf::InboundZoneOccupants`/`OutboundZoneOccupants`처럼 기존에 이미 `Replicated`였던 필드는 리플리케이션 속성을 유지한 채 타입만 배열로 확장했다.
