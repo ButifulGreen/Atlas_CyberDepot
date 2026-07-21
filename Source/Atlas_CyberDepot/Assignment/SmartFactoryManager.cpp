@@ -6,7 +6,9 @@
 #include "Agent/FactoryNPCHuman.h"
 #include "Infrastructure/IdleWaitingZone.h"
 #include "Repair/RepairProgressComponent.h"
+#include "Infrastructure/LogisticsItem.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/DataTable.h"
 #include "Net/UnrealNetwork.h"
 
 void AMSmartFactoryManager::BeginPlay()
@@ -30,6 +32,78 @@ void AMSmartFactoryManager::BeginPlay()
 void AMSmartFactoryManager::AdjustReputation(float Delta, FName Reason)
 {
 	ReputationScore += Delta;
+}
+
+bool AMSmartFactoryManager::TryAdjustFunds(float Delta, FName Reason)
+{
+	if (SharedFunds + Delta < 0.f)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Economy] 자금 조정 실패(%s) — 잔액 %.0f, 요청 %.0f"), *Reason.ToString(), SharedFunds, Delta);
+		return false;
+	}
+
+	SharedFunds += Delta;
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Economy] 자금 조정(%s) %+.0f — 잔액 %.0f"), *Reason.ToString(), Delta, SharedFunds);
+	return true;
+}
+
+void AMSmartFactoryManager::UpdateVendorOrderDisplays(const TArray<FDeliveryOrder>& ActiveOrders)
+{
+	VendorOrderDisplays.Reset(ActiveOrders.Num());
+	for (const FDeliveryOrder& Order : ActiveOrders)
+	{
+		FVendorOrderDisplay Display;
+		Display.VendorName = Order.VendorName;
+		Display.OrderID = Order.OrderID;
+		Display.QtyA = Order.RequestedQuantities.FindRef(EItemType::ItemA);
+		Display.QtyB = Order.RequestedQuantities.FindRef(EItemType::ItemB);
+		Display.QtyC = Order.RequestedQuantities.FindRef(EItemType::ItemC);
+		Display.bAvailable = (Order.Status == EOrderStatus::Available);
+		VendorOrderDisplays.Add(Display);
+	}
+
+	// 서버 자신에게는 OnRep이 자동 호출되지 않으므로 명시적으로 호출(SetState/OnRep_CurrentState와 동일 패턴).
+	if (HasAuthority())
+	{
+		OnRep_VendorOrderDisplays();
+	}
+}
+
+void AMSmartFactoryManager::OnRep_VendorOrderDisplays()
+{
+	OnVendorOrdersUpdated.Broadcast();
+}
+
+const FItemTypeDefinition* AMSmartFactoryManager::FindItemDefinition(EItemType ItemType) const
+{
+	if (!ItemPriceTable)
+	{
+		return nullptr;
+	}
+
+	TArray<FItemTypeDefinition*> Rows;
+	ItemPriceTable->GetAllRows<FItemTypeDefinition>(TEXT("AMSmartFactoryManager::FindItemDefinition"), Rows);
+	for (const FItemTypeDefinition* Row : Rows)
+	{
+		if (Row && Row->Type == ItemType)
+		{
+			return Row;
+		}
+	}
+
+	return nullptr;
+}
+
+int32 AMSmartFactoryManager::GetUnitPrice(EItemType ItemType) const
+{
+	const FItemTypeDefinition* Definition = FindItemDefinition(ItemType);
+	return Definition ? Definition->UnitPrice : 0;
+}
+
+int32 AMSmartFactoryManager::GetSellPrice(EItemType ItemType) const
+{
+	const FItemTypeDefinition* Definition = FindItemDefinition(ItemType);
+	return Definition ? Definition->SellPrice : 0;
 }
 
 AFactoryNPCHuman* AMSmartFactoryManager::FindNearestAvailableNPC(const FVector& Location) const
@@ -236,4 +310,6 @@ void AMSmartFactoryManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
 	DOREPLIFETIME(AMSmartFactoryManager, ReputationScore);
 	DOREPLIFETIME(AMSmartFactoryManager, ItemTypeToMeshSlot);
+	DOREPLIFETIME(AMSmartFactoryManager, SharedFunds);
+	DOREPLIFETIME(AMSmartFactoryManager, VendorOrderDisplays);
 }

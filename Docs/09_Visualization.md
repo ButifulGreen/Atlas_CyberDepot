@@ -36,5 +36,16 @@
 - 함수: `void BindToAgent(AFactoryAgentBase* Agent)`
 - `NativeTick`에서 `BoundAgent`의 `CurrentState`/`GetRepairComponent()->RepairProgress`를 매 프레임 폴링해 갱신한다. 실제 에이전트 머리 위 부착(`UWidgetComponent` 배치)은 에디터 작업으로 남아있다(`Docs/14_OpenIssues.md`).
 
+### `UVendorOrderListWidget` (UUserWidget, Docs 이탈, 승인됨)
+`Docs/03_InventoryOrder.md` 외부업체 랜덤 주문 시스템의 표시 + 수락 UI. `UFactoryDashboardWidget`(2차 목표, 미구현)이 예정했던 "주문 큐 패널"의 축소 선행 구현 — 전체 대시보드가 아니라 이 패널 하나만 독립 위젯으로 우선 구현했다.
+
+- 멤버: `TArray<FVendorOrderDisplay> DisplayedOrders`(`AMSmartFactoryManager::VendorOrderDisplays`의 로컬 사본, `BP_OnOrdersUpdated`로 갱신 시점을 통지)
+- 함수
+  - `void BindToManager(AMSmartFactoryManager* Manager)` (`OnVendorOrdersUpdated` 델리게이트 구독 시작 + 즉시 1회 갱신. `UAgentStatusIndicatorWidget::BindToAgent`와 동일한 바인딩 철학이지만, `NativeTick` 폴링이 아니라 델리게이트 푸시 방식 — `VendorOrderDisplays`는 `ReplicatedUsing`이라 변경 시점에만 갱신하면 충분하다)
+  - `void BindToKiosk(AFactoryKioskTerminal* Kiosk)` (`AcceptOrder`가 호출하는 `Server_SubmitKioskOrder`의 거리 체크(`KioskInteractRadius`)를 통과하려면 로컬 플레이어가 실제로 근접한 키오스크가 필요 — 이 위젯을 배치한 곳 근처의 키오스크를 지정해야 한다. 관제실 화면처럼 항상 떠 있는 UI를 의도한다면, 그 키오스크 앞에 있을 때만 수락 버튼이 실제로 동작한다는 제약이 함께 따라온다)
+  - `void AcceptOrder(FGuid OrderID)` (`BlueprintCallable` — 수락 버튼이 호출. `EOrderRequestType::OutboundApproval` + `TargetOrderID`로 기존 `Server_SubmitKioskOrder` RPC를 그대로 태운다. 새 RPC를 추가하지 않았다)
+  - `void BP_OnOrdersUpdated()` (`BlueprintImplementableEvent` — 실제 행 다시 그리기는 BP 서브클래스가 구현, C++ 쪽은 데이터+통지만 제공)
+- 각 업체 한 줄: 이름 + A/B/C 수량(`bAvailable==false`면 0/0/0으로 표시 — `RequestedQuantities` 원본은 안 지움) + 수락 버튼(BP에서 `AcceptOrder(OrderID)` 바인딩).
+
 ### ~~`UCoopRoleHUDWidget`~~ (제거됨)
 8단계에서 `EPlayerRole`/역할 배정 체계 자체가 제거되어(`Docs/02_Multiplayer_RPC.md`), 이 위젯은 더 이상 의미가 없어 9단계에서 구현하지 않는다. 다른 플레이어의 빙의 상태가 필요해지면 `UAgentStatusIndicatorWidget`처럼 대상 폰을 직접 바인딩하는 형태로 별도 설계한다.

@@ -361,7 +361,16 @@ void UOutboundDispatchSubsystem::EnqueueInboundWork(EItemType ItemType, AHorizon
 	ShelfAssignment.ReservedSlots.Add(ShelfSlotEntry);
 	ActiveStationAssignments.Add(ShelfAssignment);
 
-	TryDispatchIdleAgents();
+	// 버그 수정 — 이 함수는 이제(대기열 기능) 아틀라스가 트레이에서 물품을 집는 TransferItem 호출
+	// 스택 한가운데서 재진입 호출될 수 있다. 여기서 바로 TryDispatchIdleAgents를 돌리면, 지금 막
+	// 트레이 핸드오프를 진행 중인 그 아틀라스/로봇의 배정·상태가 미처 안정되기 전에 새 배차 스윕이
+	// 끼어들어 트립·로봇 매칭이 뒤섞였다(대기열 이전엔 이 함수가 플레이어 입력이라는 최상위 호출에서만
+	// 실행돼 이 재진입 경로 자체가 없어서 안 드러났다). 현재 호출 스택이 완전히 풀린 다음 틱으로 미뤄서
+	// 항상 안정된 상태에서 배차가 돌게 한다.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateUObject(this, &UOutboundDispatchSubsystem::TryDispatchIdleAgents));
+	}
 }
 
 bool UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder(const FGuid& OrderID)

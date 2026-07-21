@@ -77,4 +77,12 @@ struct FItemTypeDefinition : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	TSubclassOf<AStorageShelf> BoundShelfClass;
+
+	// Docs 이탈, 승인됨 — Docs/03_InventoryOrder.md 금액 산정 시스템. 플레이어 입고 주문 1개당 비용.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Economy")
+	int32 UnitPrice = 10;
+
+	// 구매가와 별도로 책정(마진) — 외부업체 출고 주문 수락 시 이 품목 1개당 수익.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Economy")
+	int32 SellPrice = 15;
 };
