@@ -24,16 +24,20 @@
 
 ### `UDeliveryOrderSubsystem` (UWorldSubsystem)
 - 멤버: `TArray<FDeliveryOrder> ActiveOrders`, `float OrderRefreshIntervalSeconds`
+  - `TArray<FTimerHandle> VendorTimers`(private — 업체별 독립 타이머, `AMSmartFactoryManager::VendorNames`와 인덱스로 매칭. `VendorNames`/`MinOrderIntervalSeconds`/`MaxOrderIntervalSeconds`/`MinQuantityPerItem`/`MaxQuantityPerItem`은 위 구조 변경으로 `AMSmartFactoryManager`로 이전됨)
 - 함수
   - `void RefreshOrderList()`
   - `bool TryPlaceTestOrder(EItemType ItemType, int32 Quantity)` (Docs에 없는 구현값 — 6단계 사이클 테스트용, `BlueprintCallable`. `RefreshOrderList`가 아직 신규 주문을 생성하지 않아(품목/수량 랜덤화 규칙 미정, 후속 밸런싱 단계) 지정한 품목/수량으로 `FDeliveryOrder`를 즉석 생성해 `ActiveOrders`에 추가한 뒤 바로 `TryAcceptOrder`까지 호출한다)
-  - `bool TryAcceptOrder(const FGuid& OrderID)` (수락 시 `UOutboundDispatchSubsystem::DecomposeOrder` 호출. 서버 게임스레드에서 순차 처리되어 동시에 여러 플레이어/현실 키오스크가 같은 주문을 승인 시도해도 먼저 처리된 쪽만 성공 — 별도 타임스탬프 큐잉 불필요)
-  - `bool TryCancelOrder(const FGuid& OrderID)` (8단계 — `Status == Accepted`이고 `UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder`가 성공(아직 로봇 미배정)할 때만 `Status`를 `Cancelled`로 전환)
+  - `bool TryAcceptOrder(const FGuid& OrderID)` (수락 시 `UOutboundDispatchSubsystem::DecomposeOrder` 호출. 서버 게임스레드에서 순차 처리되어 동시에 여러 플레이어/현실 키오스크가 같은 주문을 승인 시도해도 먼저 처리된 쪽만 성공 — 별도 타임스탬프 큐잉 불필요. Docs 이탈, 승인됨 — `RequestedQuantities`를 품목별 `AMSmartFactoryManager::GetSellPrice`로 합산해 `TryAdjustFunds`로 공용 자금에 가산, 이후 `BroadcastVendorOrderDisplays`로 표시 사본 갱신)
+  - `bool TryCancelOrder(const FGuid& OrderID)` (8단계 — `Status == Accepted`이고 `UOutboundDispatchSubsystem::TryCancelAssignmentsForOrder`가 성공(아직 로봇 미배정)할 때만 `Status`를 `Cancelled`로 전환. Cancelled/Expired 전환 시에도 표시 사본 갱신)
   - `void OnOrderExpired(const FGuid& OrderID)`
+  - `void GenerateRandomVendorOrder(int32 VendorIndex)` / `void ScheduleNextVendorOrder(int32 VendorIndex)`(Docs 이탈, 승인됨, private — 타이머 만료 시 A/B/C 랜덤 수량으로 그 업체의 `FDeliveryOrder`를 새로 생성(기존 항목 있으면 교체, 간단한 구조 유지), 표시 사본 갱신 후 다음 랜덤 간격으로 재예약. `OnWorldBeginPlay`가 업체마다 최초 1회 예약)
+  - `void BroadcastVendorOrderDisplays()`(private — `AMSmartFactoryManager::UpdateVendorOrderDisplays(ActiveOrders)` 호출)
   - `FOnDeliveryResult OnDeliveryResult`
 
 ### `FDeliveryOrder` (USTRUCT)
 - `FGuid OrderID`, `TMap<EItemType, int32> RequestedQuantities`, `FDateTime Deadline`, `EOrderStatus Status`
+- `FName VendorName`(Docs 이탈, 승인됨 — 외부업체 랜덤 주문 시스템, 어느 업체의 요청인지 식별)
 
 ### `FVendorOrderDisplay` (USTRUCT, Docs 이탈, 승인됨)
 `UDeliveryOrderSubsystem::ActiveOrders`(서버 전용, `UWorldSubsystem`이라 `DOREPLIFETIME` 불가)의 리플리케이트 표시 전용 사본 — `AMSmartFactoryManager::VendorOrderDisplays`에 저장된다. 게임 로직(배차 등)은 계속 `ActiveOrders`를 참조하고, 이 구조체는 UI 렌더링에만 쓰인다.
