@@ -104,8 +104,11 @@ void AFactoryAgentBase::DrawDebugOperationCountLabel()
 		return;
 	}
 
+	// 버그 수정(사용자 지시) — 실기 테스트 중 임계치 수치만으로는 지금 고장난 로봇이 어느 것인지 한눈에
+	// 구분이 안 됐다. Broken 상태면 빨간색으로 표시해 바로 식별 가능하게 한다.
 	const FVector Location = GetCapsuleComponent()->GetComponentLocation() + FVector(0.f, 0.f, 80.f);
-	DrawDebugString(GetWorld(), Location, FString::FromInt(GetOperationCount()), nullptr, FColor::Yellow, 1.1f, false, 1.3f);
+	const FColor LabelColor = (CurrentState == EAgentState::Broken) ? FColor::Red : FColor::Yellow;
+	DrawDebugString(GetWorld(), Location, FString::FromInt(GetOperationCount()), nullptr, LabelColor, 1.1f, false, 1.3f);
 }
 
 void AFactoryAgentBase::SetState(EAgentState NewState)

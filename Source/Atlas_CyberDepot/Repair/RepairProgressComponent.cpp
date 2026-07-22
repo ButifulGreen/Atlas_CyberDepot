@@ -138,7 +138,7 @@ void URepairProgressComponent::OnRepairCompleted()
 
 	// 정비자를 통보 없이 방치하면 AI NPC는 UnderRepair에 영구히 멈춰 FindNearestAvailableNPC 후보에서
 	// 계속 빠진다. Reset 전에 스냅샷을 떠서(재귀적으로 Server_LeaveRepair가 같은 배열을 건드리는 걸 피함)
-	// AI 제어 중인 NPC만 처리한다 — 빙의 중인 플레이어는 8단계 몫이라 여기서 움직이지 않는다.
+	// AI 제어 중인 NPC와 빙의 중인 플레이어를 나눠 처리한다(8단계).
 	const TArray<TWeakObjectPtr<AFactoryAgentBase>> RepairersSnapshot = ActiveRepairers;
 
 	RepairProgress = 0.f;
@@ -147,8 +147,16 @@ void URepairProgressComponent::OnRepairCompleted()
 	for (const TWeakObjectPtr<AFactoryAgentBase>& RepairerPtr : RepairersSnapshot)
 	{
 		AFactoryNPCHuman* NPC = Cast<AFactoryNPCHuman>(RepairerPtr.Get());
-		if (!NPC || !Cast<AFactoryAIController>(NPC->GetController()))
+		if (!NPC)
 		{
+			continue;
+		}
+
+		if (!Cast<AFactoryAIController>(NPC->GetController()))
+		{
+			// 버그 수정(8단계) — 빙의 중인 플레이어는 AI 재배차 대상이 아니다. 참여 상태만 정리해
+			// 다음 상호작용부터 올바르게(재참여) 동작하게 한다.
+			NPC->OnJoinedRepairCompleted();
 			continue;
 		}
 

@@ -4,7 +4,6 @@
 #include "Atlas_CyberDepot.h"
 #include "Player/FactorySpectatorPawn.h"
 #include "Infrastructure/FactoryKioskTerminal.h"
-#include "Agent/FactoryAgentBase.h"
 #include "Agent/FactoryNPCHuman.h"
 #include "Repair/RepairProgressComponent.h"
 
@@ -20,11 +19,21 @@ void AFactoryPlayerController::OnPossess(APawn* InPawn)
 
 void AFactoryPlayerController::Server_RequestPossessNPC_Implementation(AFactoryNPCHuman* TargetNPC)
 {
-	if (!TargetNPC || !TargetNPC->CanBePossessedBy(this))
+	// 버그 수정(로깅 규율) — 이 RPC가 서버에 실제로 도착했는지조차 로그가 없어 확인할 수 없었다(클라이언트
+	// 쪽 IA_Interact/트레이스 문제와 서버 쪽 빙의 거부를 구분 불가).
+	if (!TargetNPC)
 	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Server_RequestPossessNPC 무시 — TargetNPC가 없음(RPC는 도착함)"), *GetName());
 		return;
 	}
 
+	if (!TargetNPC->CanBePossessedBy(this))
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Server_RequestPossessNPC 무시 — %s는 이미 다른 플레이어가 빙의 중"), *GetName(), *TargetNPC->GetName());
+		return;
+	}
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] %s 빙의 성공"), *GetName(), *TargetNPC->GetName());
 	Possess(TargetNPC);
 }
 
@@ -34,6 +43,8 @@ void AFactoryPlayerController::Server_ReleaseNPC_Implementation()
 	APawn* TargetSpectatorPawn = OriginalSpectatorPawn.Get();
 	if (!PossessedNPC || !TargetSpectatorPawn)
 	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Server_ReleaseNPC 무시 — PossessedNPC=%s, OriginalSpectatorPawn=%s"),
+			*GetName(), PossessedNPC ? TEXT("있음") : TEXT("없음"), TargetSpectatorPawn ? TEXT("있음") : TEXT("없음"));
 		return;
 	}
 
@@ -70,23 +81,23 @@ void AFactoryPlayerController::Server_SubmitKioskOrder_Implementation(AFactoryKi
 void AFactoryPlayerController::Server_JoinRepair_Implementation(UActorComponent* TargetRepairComponent)
 {
 	URepairProgressComponent* RepairComponent = Cast<URepairProgressComponent>(TargetRepairComponent);
-	AFactoryAgentBase* PossessedAgent = Cast<AFactoryAgentBase>(GetPawn());
-	if (!RepairComponent || !PossessedAgent)
+	AFactoryNPCHuman* PossessedNPC = Cast<AFactoryNPCHuman>(GetPawn());
+	if (!RepairComponent || !PossessedNPC)
 	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Server_JoinRepair 무시 — RepairComponent=%s, PossessedNPC=%s"),
+			*GetName(), RepairComponent ? TEXT("있음") : TEXT("없음"), PossessedNPC ? TEXT("있음") : TEXT("없음"));
 		return;
 	}
 
-	RepairComponent->Server_JoinRepair(PossessedAgent);
+	PossessedNPC->JoinRepairAsPlayer(RepairComponent);
 }
 
 void AFactoryPlayerController::Server_LeaveRepair_Implementation(UActorComponent* TargetRepairComponent)
 {
-	URepairProgressComponent* RepairComponent = Cast<URepairProgressComponent>(TargetRepairComponent);
-	AFactoryAgentBase* PossessedAgent = Cast<AFactoryAgentBase>(GetPawn());
-	if (!RepairComponent || !PossessedAgent)
+	// 버그 수정(8단계) — 인자로 받은 컴포넌트를 그대로 신뢰하지 않고, NPC 자신이 서버 권위로 들고 있는
+	// JoinedRepairComponent를 이탈시킨다(클라이언트가 지연된/잘못된 값을 보내도 안전).
+	if (AFactoryNPCHuman* PossessedNPC = Cast<AFactoryNPCHuman>(GetPawn()))
 	{
-		return;
+		PossessedNPC->LeaveRepairAsPlayer();
 	}
-
-	RepairComponent->Server_LeaveRepair(PossessedAgent);
 }

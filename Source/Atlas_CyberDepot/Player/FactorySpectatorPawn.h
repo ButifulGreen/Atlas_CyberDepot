@@ -33,7 +33,11 @@ public:
 	float InteractTraceDistance = 300.f;
 
 protected:
-	virtual void BeginPlay() override;
+	// 버그 수정 — 매핑 컨텍스트 추가를 BeginPlay()가 아니라 여기서 한다. BeginPlay()는 GameMode가 기본 폰을
+	// 스폰하는 시점에 실행되는데 이때는 아직 컨트롤러가 빙의(Possess)하기 전이라 GetController()가 항상
+	// nullptr이었다 — Enhanced Input 액션(IA_Interact)이 전혀 반응하지 않는 원인이었다(레거시 축 입력
+	// 기반 자유비행 이동은 이 컨텍스트와 무관해 정상 동작했던 것과 대비됨).
+	virtual void PossessedBy(AController* NewController) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 private:

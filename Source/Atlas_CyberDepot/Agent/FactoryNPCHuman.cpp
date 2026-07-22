@@ -3,9 +3,15 @@
 #include "Agent/FactoryNPCHuman.h"
 #include "Atlas_CyberDepot.h"
 #include "Agent/FactoryAIController.h"
+#include "Player/FactoryPlayerController.h"
 #include "Repair/RepairProgressComponent.h"
 #include "NavigationSystem.h"
 #include "GameFramework/PlayerController.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "Net/UnrealNetwork.h"
+#include "Engine/OverlapResult.h"
+#include "DrawDebugHelpers.h"
 
 AFactoryNPCHuman::AFactoryNPCHuman()
 {
@@ -142,5 +148,348 @@ bool AFactoryNPCHuman::CanBePossessedBy(APlayerController* RequestingController)
 void AFactoryNPCHuman::ReleasePossession()
 {
 	// AutoPossessAI/AIControllerClass 설정에 따라 AI 제어를 되찾는다(레벨 배치 시 설정 필요 — 8단계 범위 밖).
+	// SpawnDefaultController()가 내부적으로 새 AI 컨트롤러의 Possess()를 호출하는 과정에서, 지금 이 폰을
+	// 쥐고 있던 기존(플레이어) 컨트롤러의 UnPossess()가 먼저 자동으로 불린다 — 아래 UnPossessed()가
+	// 그 경로로 자연스럽게 실행되어 정비 참여 정리를 별도 호출 없이 처리한다.
 	SpawnDefaultController();
+}
+
+void AFactoryNPCHuman::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	// 버그 수정(로깅 오탐) — AI 컨트롤러 빙의(레벨 시작 시 정상 동작)에서도 매번 경고가 찍혔다.
+	// 플레이어가 아닌 빙의는 Enhanced Input 설정 대상이 아니므로 조용히 지나간다.
+	APlayerController* PC = Cast<APlayerController>(NewController);
+	if (!PC)
+	{
+		BoundInputPlayerController = nullptr;
+		return;
+	}
+
+	ULocalPlayer* LocalPlayer = PC->GetLocalPlayer();
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer ? LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr;
+	if (!Subsystem)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: EnhancedInputLocalPlayerSubsystem을 못 찾음"), *GetName());
+	}
+	else
+	{
+		if (DefaultMappingContext)
+		{
+			Subsystem->AddMappingContext(DefaultMappingContext, 0);
+		}
+		else
+		{
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: DefaultMappingContext가 비어있음 — BP_FactoryNPCHuman에서 IMC_Default 할당 필요"), *GetName());
+		}
+
+		if (MouseLookMappingContext)
+		{
+			Subsystem->AddMappingContext(MouseLookMappingContext, 0);
+		}
+		else
+		{
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MouseLookMappingContext가 비어있음 — BP_FactoryNPCHuman에서 IMC_MouseLook 할당 필요"), *GetName());
+		}
+
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 빙의 중 매핑 컨텍스트 추가 완료"), *GetName());
+	}
+
+	BoundInputPlayerController = PC;
+
+	// 로컬로 조작 중인 클라이언트 화면에만 정비 참여 상태를 계속 표시(다른 클라이언트 화면엔 안 뜸).
+	if (PC->IsLocalController())
+	{
+		GetWorldTimerManager().SetTimer(RepairStatusDebugTimerHandle, this, &AFactoryNPCHuman::DrawRepairStatusDebugMessage, 0.5f, true);
+	}
+}
+
+void AFactoryNPCHuman::UnPossessed()
+{
+	GetWorldTimerManager().ClearTimer(RepairStatusDebugTimerHandle);
+
+	// 버그 수정(8단계) — 빙의 해제(명시적 이탈/접속 끊김 등 전부 포함)를 정비 참여 종료 시점으로도 겸한다.
+	if (HasAuthority())
+	{
+		LeaveRepairAsPlayer();
+	}
+
+	if (APlayerController* PC = BoundInputPlayerController.Get())
+	{
+		if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+		{
+			if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+			{
+				if (DefaultMappingContext)
+				{
+					Subsystem->RemoveMappingContext(DefaultMappingContext);
+				}
+				if (MouseLookMappingContext)
+				{
+					Subsystem->RemoveMappingContext(MouseLookMappingContext);
+				}
+			}
+		}
+	}
+	BoundInputPlayerController = nullptr;
+
+	Super::UnPossessed();
+}
+
+void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+	// 버그 수정(로깅 규율) — 프로퍼티 미할당을 조용히 넘기면 BP 할당 누락과 다른 원인을 구분할 방법이 없다.
+	UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent);
+	if (!EnhancedInput)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: PlayerInputComponent가 UEnhancedInputComponent가 아님"), *GetName());
+		return;
+	}
+
+	if (MoveAction)
+	{
+		EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AFactoryNPCHuman::OnMoveTriggered);
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MoveAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+	}
+
+	if (LookAction)
+	{
+		EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &AFactoryNPCHuman::OnLookTriggered);
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: LookAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+	}
+
+	if (MouseLookAction)
+	{
+		EnhancedInput->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &AFactoryNPCHuman::OnLookTriggered);
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MouseLookAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+	}
+
+	if (JumpAction)
+	{
+		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: JumpAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+	}
+
+	if (InteractAction)
+	{
+		EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &AFactoryNPCHuman::OnInteractTriggered);
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: InteractAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+	}
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 빙의 입력 바인딩 완료"), *GetName());
+}
+
+void AFactoryNPCHuman::OnMoveTriggered(const FInputActionValue& Value)
+{
+	const FVector2D MoveInput = Value.Get<FVector2D>();
+	if (!Controller)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: OnMoveTriggered — Controller가 없음"), *GetName());
+		return;
+	}
+
+	const FRotator YawRotation(0.f, Controller->GetControlRotation().Yaw, 0.f);
+	AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X), MoveInput.Y);
+	AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y), MoveInput.X);
+}
+
+void AFactoryNPCHuman::OnLookTriggered(const FInputActionValue& Value)
+{
+	const FVector2D LookInput = Value.Get<FVector2D>();
+	AddControllerYawInput(LookInput.X);
+	AddControllerPitchInput(LookInput.Y);
+}
+
+AFactoryAgentBase* AFactoryNPCHuman::FindRepairableInFrontOfCamera() const
+{
+	// 버그 수정(사용자 리포트) — GetActorEyesViewPoint()는 액터 자신의 회전(몸통이 향한 방향)을 쓰는데,
+	// 이 캐릭터는 3인칭 카메라가 몸통 방향과 독립적으로 움직인다 — 화면상 조준과 무관하게 몸통이 향한
+	// 방향(주로 지형 쪽)으로 나가 실기 테스트에서 매번 Landscape에 맞는 문제가 있었다. 실제 카메라 시점
+	// (PlayerCameraManager 반영)의 Yaw만 쓴다 — Pitch(위아래 시선)까지 반영하면 아래를 볼 때 박스가
+	// 지면 쪽으로 기울어 저상 대상(배송로봇)을 오히려 놓치기 쉬워, 캐릭터 위치 기준 수평으로 스윕한다.
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	if (!PC)
+	{
+		return nullptr;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	// 버그 수정(사용자 지시) — 라인트레이스는 배송로봇처럼 NPC 무릎보다 낮은 대상을 시선 각도에 따라
+	// 놓칠 수 있어 박스 스윕으로 전환. 발밑부터 머리 위까지 넉넉히 덮도록 캐릭터 위치를 기준으로 삼는다.
+	const FRotator LevelRotation(0.f, ViewRotation.Yaw, 0.f);
+	const FVector Direction = LevelRotation.Vector();
+	const FVector Start = GetActorLocation();
+	const FVector BoxCenter = Start + Direction * (RepairInteractTraceDistance * 0.5f);
+	const FQuat BoxRotation = LevelRotation.Quaternion();
+	const FCollisionShape Box = FCollisionShape::MakeBox(FVector(RepairInteractTraceDistance * 0.5f, RepairInteractBoxHalfWidth, RepairInteractBoxHalfHeight));
+
+	// 사용자 지시 — F를 누를 때마다 실제로 검사한 범위를 눈으로 볼 수 있게 항상 그린다(결과와 무관).
+	DrawDebugBox(GetWorld(), BoxCenter, Box.GetExtent(), BoxRotation, FColor::Cyan, false, 1.f, 0, 3.f);
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	TArray<FOverlapResult> Overlaps;
+	GetWorld()->OverlapMultiByChannel(Overlaps, BoxCenter, BoxRotation, ECC_Pawn, Box, QueryParams);
+
+	AFactoryAgentBase* BestAgent = nullptr;
+	float BestDistSq = TNumericLimits<float>::Max();
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AFactoryAgentBase* HitAgent = Cast<AFactoryAgentBase>(Overlap.GetActor());
+		if (!HitAgent || HitAgent->CurrentState != EAgentState::Broken || !HitAgent->GetRepairComponent())
+		{
+			continue;
+		}
+
+		const float DistSq = FVector::DistSquared(Start, HitAgent->GetActorLocation());
+		if (DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			BestAgent = HitAgent;
+		}
+	}
+
+	if (!BestAgent)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 감지 범위 내 Broken 정비 대상 없음(%d개 겹침)"), *GetName(), Overlaps.Num());
+	}
+
+	return BestAgent;
+}
+
+void AFactoryNPCHuman::OnInteractTriggered(const FInputActionValue& Value)
+{
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Interact 트리거됨(빙의 중)"), *GetName());
+
+	AFactoryPlayerController* PC = Cast<AFactoryPlayerController>(GetController());
+	if (!PC)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AFactoryPlayerController 캐스트 실패(GetController()=%s)"),
+			*GetName(), GetController() ? *GetController()->GetClass()->GetName() : TEXT("None"));
+		return;
+	}
+
+	if (JoinedRepairComponent)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 이미 참여 중인 정비 이탈 요청"), *GetName());
+		PC->Server_LeaveRepair(JoinedRepairComponent);
+		return;
+	}
+
+	AFactoryAgentBase* Target = FindRepairableInFrontOfCamera();
+	URepairProgressComponent* TargetRepair = Target ? Target->GetRepairComponent() : nullptr;
+	if (!TargetRepair)
+	{
+		return;
+	}
+
+	// 사용자 지시 — 감지+참여 시작 순간만큼은 다른 에이전트 로그에 묻히지 않도록 Warning 등급 +
+	// 화면 플래시 메시지로 별도 표시(위의 지속 상태 표시와는 다른 키라 겹쳐 쌓인다).
+	UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] ▶▶▶ %s: %s 정비 참여 시작 ◀◀◀"), *GetName(), *Target->GetName());
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.f, FColor::Green,
+			FString::Printf(TEXT("정비 대상 감지 — %s 참여 시작!"), *Target->GetName()));
+	}
+	PC->Server_JoinRepair(TargetRepair);
+}
+
+void AFactoryNPCHuman::JoinRepairAsPlayer(URepairProgressComponent* RepairComponent)
+{
+	if (!RepairComponent || JoinedRepairComponent == RepairComponent)
+	{
+		return;
+	}
+
+	// 이미 다른 정비에 참여 중이었으면 먼저 이탈(한 번에 하나만 돕는다).
+	LeaveRepairAsPlayer();
+
+	// Broken 상태만 대상으로 삼으므로(FindRepairableInFrontOfCamera) 항상 FullRepair — AI의
+	// AssignMaintenance와 동일하게 매 참여 시점에 반영한다(이미 같은 값이면 덮어써도 무해).
+	RepairComponent->CurrentRepairType = ERepairType::FullRepair;
+	RepairComponent->Server_JoinRepair(this);
+	JoinedRepairComponent = RepairComponent;
+	SetState(EAgentState::UnderRepair);
+}
+
+void AFactoryNPCHuman::LeaveRepairAsPlayer()
+{
+	if (URepairProgressComponent* Joined = JoinedRepairComponent)
+	{
+		Joined->Server_LeaveRepair(this);
+	}
+	JoinedRepairComponent = nullptr;
+
+	if (CurrentState == EAgentState::UnderRepair)
+	{
+		SetState(EAgentState::Idle);
+	}
+}
+
+void AFactoryNPCHuman::OnJoinedRepairCompleted()
+{
+	JoinedRepairComponent = nullptr;
+	if (CurrentState == EAgentState::UnderRepair)
+	{
+		SetState(EAgentState::Idle);
+	}
+}
+
+void AFactoryNPCHuman::DrawRepairStatusDebugMessage()
+{
+	if (!GEngine)
+	{
+		return;
+	}
+
+	// GetUniqueID() — 이 NPC 전용 키로 고정해 매번 새 줄로 쌓이지 않고 같은 자리를 계속 덮어쓰게 한다.
+	const int32 Key = GetUniqueID();
+
+	if (URepairProgressComponent* Repair = JoinedRepairComponent)
+	{
+		const bool bIsFullRepair = Repair->CurrentRepairType == ERepairType::FullRepair;
+		const float TargetDuration = bIsFullRepair ? Repair->FullRepairDurationSeconds : Repair->QuickCheckDurationSeconds;
+		const float Percent = TargetDuration > 0.f ? FMath::Clamp(Repair->RepairProgress / TargetDuration * 100.f, 0.f, 100.f) : 0.f;
+		const AActor* TargetOwner = Repair->GetOwner();
+
+		GEngine->AddOnScreenDebugMessage(Key, 0.6f, FColor::Green,
+			FString::Printf(TEXT("[정비 참여 중] 대상: %s / %s / 진행률 %.0f%% (%d명 참여)"),
+				TargetOwner ? *TargetOwner->GetName() : TEXT("?"),
+				bIsFullRepair ? TEXT("FullRepair") : TEXT("QuickCheck"),
+				Percent, Repair->GetValidRepairerCount()));
+	}
+	else
+	{
+		GEngine->AddOnScreenDebugMessage(Key, 0.6f, FColor::White, TEXT("[정비 미참여] F키로 고장난 로봇에 다가가 참여 가능"));
+	}
+}
+
+void AFactoryNPCHuman::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AFactoryNPCHuman, JoinedRepairComponent);
 }
