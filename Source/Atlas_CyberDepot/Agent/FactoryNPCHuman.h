@@ -11,6 +11,8 @@ class APlayerController;
 class UInputAction;
 class UInputMappingContext;
 struct FInputActionValue;
+class AFactoryKioskTerminal;
+class UVendorOrderListWidget;
 
 // Docs/04_Agent_AI.md에 값이 명시돼 있지 않아 관련 함수(StartPatrol/ReturnToOfficeRoom/CallToOfficeExit)에서
 // 유추 가능한 최소 상태만 정의
@@ -97,9 +99,18 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> JumpAction;
 
-	// AFactorySpectatorPawn::InteractAction과 같은 IA_Interact 에셋을 가리키도록 할당할 것(신규 액션 하나 공유).
+	// F 전용 — 빙의 해제만 담당(AFactorySpectatorPawn::InteractAction과 같은 IA_Interact 에셋 공유, 사용자 지시로
+	// 정비/키오스크와 분리).
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> InteractAction;
+
+	// 좌클릭 전용 — 정비 참여/이탈 + 키오스크 상호작용(AFactorySpectatorPawn::ClickAction과 같은 IA_Click 에셋 공유).
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> ClickAction;
+
+	// AFactorySpectatorPawn::KioskWidgetClass와 같은 WBP를 가리키도록 할당(빙의 여부와 무관하게 동일 동작, 사용자 지시).
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TSubclassOf<UVendorOrderListWidget> KioskWidgetClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Interact")
 	float RepairInteractTraceDistance = 300.f;
@@ -111,6 +122,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Interact")
 	float RepairInteractBoxHalfHeight = 150.f;
+
+	// 키오스크 감지 사거리(라인트레이스) — RepairInteractTraceDistance와 별개로 에디터에서 조정 가능.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Interact")
+	float KioskInteractTraceDistance = 300.f;
 
 	// 8단계 신규 — 빙의 중 상호작용으로 정비 참여/이탈(AssignMaintenance의 플레이어 대응). 이미 다른 정비에
 	// 참여 중이면 먼저 이탈한 뒤 참여한다(동시에 하나만 돕는다).
@@ -132,10 +147,22 @@ private:
 
 	void OnMoveTriggered(const FInputActionValue& Value);
 	void OnLookTriggered(const FInputActionValue& Value);
+	// F 전용 — 빙의 해제(Server_ReleaseNPC) 요청만 담당.
 	void OnInteractTriggered(const FInputActionValue& Value);
+	// 좌클릭 전용 — 정비 참여/이탈 + 키오스크 상호작용(우선순위: 위젯이 열려있으면 닫기 > 정비 이탈 >
+	// 정비 참여 > 키오스크 열기).
+	void OnClickTriggered(const FInputActionValue& Value);
 	// 시야 정면 트레이스로 Broken 상태 + RepairComponent 보유 대상만 후보로 삼는다(AFactorySpectatorPawn::
 	// FindInteractableInFrontOfCamera와 동일 패턴).
 	AFactoryAgentBase* FindRepairableInFrontOfCamera() const;
+	// AFactorySpectatorPawn::FindInteractableInFrontOfCamera의 키오스크 감지 부분과 동일한 라인트레이스 패턴.
+	AFactoryKioskTerminal* FindKioskInFrontOfCamera() const;
+
+	void OpenKioskWidget(AFactoryKioskTerminal* Kiosk);
+	void CloseKioskWidget();
+
+	UPROPERTY()
+	TObjectPtr<UVendorOrderListWidget> ActiveKioskWidget;
 
 	// 버그 수정(사용자 지시) — 로봇 여러 대가 동시에 작업 중이면 각자의 디버그 로그가 뒤섞여 "내가 지금
 	// 정비 중인지"를 로그만으로 판단하기 어렵다. 로컬 컨트롤 중인 동안만(다른 클라이언트 화면엔 안 뜸)

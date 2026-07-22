@@ -5,10 +5,14 @@
 #include "Agent/FactoryAIController.h"
 #include "Player/FactoryPlayerController.h"
 #include "Repair/RepairProgressComponent.h"
+#include "Infrastructure/FactoryKioskTerminal.h"
+#include "Visualization/VendorOrderListWidget.h"
+#include "Assignment/SmartFactoryManager.h"
 #include "NavigationSystem.h"
 #include "GameFramework/PlayerController.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Blueprint/UserWidget.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
@@ -209,6 +213,9 @@ void AFactoryNPCHuman::UnPossessed()
 {
 	GetWorldTimerManager().ClearTimer(RepairStatusDebugTimerHandle);
 
+	// 버그 수정 — 키오스크 위젯이 열린 채로 빙의 해제되면 입력모드/마우스 커서/이동잠금이 눌러붙는다.
+	CloseKioskWidget();
+
 	// 버그 수정(8단계) — 빙의 해제(명시적 이탈/접속 끊김 등 전부 포함)를 정비 참여 종료 시점으로도 겸한다.
 	if (HasAuthority())
 	{
@@ -295,11 +302,26 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: InteractAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
 	}
 
+	if (ClickAction)
+	{
+		EnhancedInput->BindAction(ClickAction, ETriggerEvent::Started, this, &AFactoryNPCHuman::OnClickTriggered);
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: ClickAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+	}
+
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 빙의 입력 바인딩 완료"), *GetName());
 }
 
 void AFactoryNPCHuman::OnMoveTriggered(const FInputActionValue& Value)
 {
+	// 사용자 지시 — 키오스크 위젯이 열린 동안은 이동 입력을 완전히 무시한다(마우스만 움직일 수 있어야 함).
+	if (ActiveKioskWidget)
+	{
+		return;
+	}
+
 	const FVector2D MoveInput = Value.Get<FVector2D>();
 	if (!Controller)
 	{
@@ -314,6 +336,12 @@ void AFactoryNPCHuman::OnMoveTriggered(const FInputActionValue& Value)
 
 void AFactoryNPCHuman::OnLookTriggered(const FInputActionValue& Value)
 {
+	// 사용자 지시 — 키오스크 위젯이 열린 동안은 시점 회전도 멈춘다(마우스는 커서로만 동작).
+	if (ActiveKioskWidget)
+	{
+		return;
+	}
+
 	const FVector2D LookInput = Value.Get<FVector2D>();
 	AddControllerYawInput(LookInput.X);
 	AddControllerPitchInput(LookInput.Y);
@@ -380,15 +408,67 @@ AFactoryAgentBase* AFactoryNPCHuman::FindRepairableInFrontOfCamera() const
 	return BestAgent;
 }
 
+AFactoryKioskTerminal* AFactoryNPCHuman::FindKioskInFrontOfCamera() const
+{
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	if (!PC)
+	{
+		return nullptr;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * KioskInteractTraceDistance;
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	FHitResult Hit;
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation, TraceEnd, ECC_Visibility, QueryParams))
+	{
+		return nullptr;
+	}
+
+	return Cast<AFactoryKioskTerminal>(Hit.GetActor());
+}
+
 void AFactoryNPCHuman::OnInteractTriggered(const FInputActionValue& Value)
 {
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Interact 트리거됨(빙의 중)"), *GetName());
+	// 사용자 지시 — F는 빙의 해제 전용(정비/키오스크는 좌클릭, OnClickTriggered 참고). F/정비/키오스크가
+	// 전부 같은 키를 썼을 때 "다시 눌러도 빙의가 안 풀리는" 문제가 있었다 — 셋을 분리해 해소.
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Interact 트리거됨(빙의 해제 요청)"), *GetName());
 
 	AFactoryPlayerController* PC = Cast<AFactoryPlayerController>(GetController());
 	if (!PC)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AFactoryPlayerController 캐스트 실패(GetController()=%s)"),
 			*GetName(), GetController() ? *GetController()->GetClass()->GetName() : TEXT("None"));
+		return;
+	}
+
+	PC->Server_ReleaseNPC();
+}
+
+void AFactoryNPCHuman::OnClickTriggered(const FInputActionValue& Value)
+{
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Click 트리거됨(빙의 중)"), *GetName());
+
+	AFactoryPlayerController* PC = Cast<AFactoryPlayerController>(GetController());
+	if (!PC)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AFactoryPlayerController 캐스트 실패(GetController()=%s)"),
+			*GetName(), GetController() ? *GetController()->GetClass()->GetName() : TEXT("None"));
+		return;
+	}
+
+	// 위젯이 열려있으면 이 클릭은 무조건 닫기 전용 — 열린 동안은 이동/시점이 멈춰 있어 새로 다른
+	// 상호작용을 시작할 상황 자체가 아니다(사용자 지시).
+	if (ActiveKioskWidget)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크 위젯 닫기(토글)"), *GetName());
+		CloseKioskWidget();
 		return;
 	}
 
@@ -399,22 +479,85 @@ void AFactoryNPCHuman::OnInteractTriggered(const FInputActionValue& Value)
 		return;
 	}
 
-	AFactoryAgentBase* Target = FindRepairableInFrontOfCamera();
-	URepairProgressComponent* TargetRepair = Target ? Target->GetRepairComponent() : nullptr;
-	if (!TargetRepair)
+	if (AFactoryAgentBase* Target = FindRepairableInFrontOfCamera())
+	{
+		if (URepairProgressComponent* TargetRepair = Target->GetRepairComponent())
+		{
+			// 사용자 지시 — 감지+참여 시작 순간만큼은 다른 에이전트 로그에 묻히지 않도록 Warning 등급 +
+			// 화면 플래시 메시지로 별도 표시(위의 지속 상태 표시와는 다른 키라 겹쳐 쌓인다).
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] ▶▶▶ %s: %s 정비 참여 시작 ◀◀◀"), *GetName(), *Target->GetName());
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.f, FColor::Green,
+					FString::Printf(TEXT("정비 대상 감지 — %s 참여 시작!"), *Target->GetName()));
+			}
+			PC->Server_JoinRepair(TargetRepair);
+			return;
+		}
+	}
+
+	if (AFactoryKioskTerminal* Kiosk = FindKioskInFrontOfCamera())
+	{
+		OpenKioskWidget(Kiosk);
+	}
+}
+
+void AFactoryNPCHuman::OpenKioskWidget(AFactoryKioskTerminal* Kiosk)
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC || !KioskWidgetClass)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: 키오스크 위젯을 열 수 없음(PC=%s, KioskWidgetClass=%s)"),
+			*GetName(), PC ? TEXT("있음") : TEXT("없음"), KioskWidgetClass ? TEXT("있음") : TEXT("비어있음 — BP_FactoryNPCHuman에서 KioskWidgetClass 할당 필요"));
+		return;
+	}
+
+	ActiveKioskWidget = CreateWidget<UVendorOrderListWidget>(PC, KioskWidgetClass);
+	if (!ActiveKioskWidget)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: CreateWidget(KioskWidgetClass) 실패"), *GetName());
+		return;
+	}
+
+	if (AMSmartFactoryManager* Manager = GetWorld()->GetGameState<AMSmartFactoryManager>())
+	{
+		ActiveKioskWidget->BindToManager(Manager);
+	}
+	else
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AMSmartFactoryManager(GameState)를 못 찾음 — 위젯이 주문 목록을 못 받음"), *GetName());
+	}
+	ActiveKioskWidget->BindToKiosk(Kiosk);
+	ActiveKioskWidget->AddToViewport();
+
+	// 사용자 지시 — 위젯이 열린 동안은 캐릭터 이동/시야 회전 없이 마우스 커서만 움직일 수 있어야 한다.
+	PC->SetInputMode(FInputModeGameAndUI());
+	PC->SetShowMouseCursor(true);
+	PC->SetIgnoreMoveInput(true);
+	PC->SetIgnoreLookInput(true);
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크(%s) 위젯 열림"), *GetName(), *Kiosk->GetName());
+}
+
+void AFactoryNPCHuman::CloseKioskWidget()
+{
+	if (!ActiveKioskWidget)
 	{
 		return;
 	}
 
-	// 사용자 지시 — 감지+참여 시작 순간만큼은 다른 에이전트 로그에 묻히지 않도록 Warning 등급 +
-	// 화면 플래시 메시지로 별도 표시(위의 지속 상태 표시와는 다른 키라 겹쳐 쌓인다).
-	UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] ▶▶▶ %s: %s 정비 참여 시작 ◀◀◀"), *GetName(), *Target->GetName());
-	if (GEngine)
+	ActiveKioskWidget->RemoveFromParent();
+	ActiveKioskWidget = nullptr;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
-		GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.f, FColor::Green,
-			FString::Printf(TEXT("정비 대상 감지 — %s 참여 시작!"), *Target->GetName()));
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->SetShowMouseCursor(false);
+		PC->SetIgnoreMoveInput(false);
+		PC->SetIgnoreLookInput(false);
 	}
-	PC->Server_JoinRepair(TargetRepair);
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크 위젯 닫힘"), *GetName());
 }
 
 void AFactoryNPCHuman::JoinRepairAsPlayer(URepairProgressComponent* RepairComponent)
@@ -483,7 +626,7 @@ void AFactoryNPCHuman::DrawRepairStatusDebugMessage()
 	}
 	else
 	{
-		GEngine->AddOnScreenDebugMessage(Key, 0.6f, FColor::White, TEXT("[정비 미참여] F키로 고장난 로봇에 다가가 참여 가능"));
+		GEngine->AddOnScreenDebugMessage(Key, 0.6f, FColor::White, TEXT("[정비 미참여] 좌클릭으로 고장난 로봇에 다가가 참여 가능"));
 	}
 }
 

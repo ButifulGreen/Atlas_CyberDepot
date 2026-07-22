@@ -55,26 +55,16 @@ void AFactoryPlayerController::Server_ReleaseNPC_Implementation()
 void AFactoryPlayerController::Server_SubmitKioskOrder_Implementation(AFactoryKioskTerminal* SourceKiosk, FKioskOrderRequest Request)
 {
 	UWorld* World = GetWorld();
-	APawn* MyPawn = GetPawn();
-	if (!SourceKiosk || !World || !MyPawn)
+	if (!SourceKiosk || !World)
 	{
-		// 버그 수정 — 이 세 경로가 로그 없이 조용히 실패해서, BoundKiosk가 비어있는 경우(위젯 바인딩
-		// 문제)와 실제 배차 실패를 구분할 수 없었다.
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Server_SubmitKioskOrder 무시 — SourceKiosk=%s, World=%s, MyPawn=%s"),
-			*GetName(), SourceKiosk ? TEXT("있음") : TEXT("없음"), World ? TEXT("있음") : TEXT("없음"), MyPawn ? TEXT("있음") : TEXT("없음"));
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Server_SubmitKioskOrder 무시 — SourceKiosk=%s, World=%s"),
+			*GetName(), SourceKiosk ? TEXT("있음") : TEXT("없음"), World ? TEXT("있음") : TEXT("없음"));
 		return;
 	}
 
-	const float DistSq = FVector::DistSquared(MyPawn->GetActorLocation(), SourceKiosk->GetActorLocation());
-	if (DistSq > FMath::Square(KioskInteractRadius))
-	{
-		// 버그 수정 — 거리 초과도 로그 없이 조용히 실패했다. 상시 노출 UI(대시보드형 위젯)에서 버튼을
-		// 누르는 시나리오는 실제 키오스크 물리적 근접과 무관할 수 있어, 이 실패가 흔한 원인일 수 있다.
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Server_SubmitKioskOrder 무시 — %s와 거리 초과(%.0f > %.0f)"),
-			*GetName(), *SourceKiosk->GetName(), FMath::Sqrt(DistSq), KioskInteractRadius);
-		return;
-	}
-
+	// 버그 수정(사용자 지시) — 거리 재검증(KioskInteractRadius) 개념 삭제. 위젯을 여는 시점(인터렉트 사거리)에
+	// 이미 근접을 확인했으므로 여기서 다시 재는 건 이중 체크였고, 두 사거리 값이 서로 어긋나면 "위젯은
+	// 열리는데 버튼만 안 먹는" 간극이 생겼다. 위젯이 열려있다는 사실 자체가 유효한 주문 자격이다.
 	ApplyKioskOrderRequest(World, Request);
 }
 
