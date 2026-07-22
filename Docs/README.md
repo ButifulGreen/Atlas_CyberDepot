@@ -14,7 +14,7 @@
 | `05_Repair.md` | 정비 레이어, `URepairProgressComponent` (§5) | 7단계 — 정비/고장 |
 | `06_Infrastructure.md` | 선반, 트레이, 도킹 포인트, 대기실(`AIdleWaitingZone`) (§6) | 4단계 — 인프라 |
 | `07_TaskAssignment.md` | 작업 배정 레이어, `UOutboundDispatchSubsystem` (§7) | 6단계 — 배정/디스패치 |
-| `08_Navigation.md` | NavArea, QueryFilter, `ACostZoneVolume` (§8) | 3단계 — Navigation |
+| `08_Navigation.md` | NavArea, QueryFilter, 웨이포인트 그래프 (§8) | 3단계 — Navigation |
 | `09_Visualization.md` | 미니맵/관제실 UI 레이어 (§9) | 9단계 — 시각화 |
 | `10_Benchmark_Replay.md` | 벤치마크 하네스, 리플레이 (§10) | 10단계 — 마지막 |
 | `11_MQTT.md` | 언리얼 측 MQTT 클라이언트 (§11) | 9단계 — 외부 통신 |

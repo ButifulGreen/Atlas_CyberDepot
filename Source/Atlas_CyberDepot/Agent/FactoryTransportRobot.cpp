@@ -8,7 +8,6 @@
 #include "Infrastructure/StorageShelf.h"
 #include "Infrastructure/HorizontalTray.h"
 #include "Infrastructure/IdleWaitingZone.h"
-#include "Navigation/CostZoneVolume.h"
 #include "Navigation/FactoryNavWaypoint.h"
 #include "Assignment/OutboundDispatchSubsystem.h"
 #include "Assignment/SmartFactoryManager.h"
@@ -525,63 +524,6 @@ bool AFactoryTransportRobot::HasRestedTransportRobotAvailable() const
 	}
 
 	return false;
-}
-
-void AFactoryTransportRobot::OnEnterBlockedState()
-{
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
-	TArray<AActor*> FoundZones;
-	UGameplayStatics::GetAllActorsOfClass(World, ACostZoneVolume::StaticClass(), FoundZones);
-
-	const FVector MyLocation = GetActorLocation();
-	for (AActor* ZoneActor : FoundZones)
-	{
-		if (ACostZoneVolume* Zone = Cast<ACostZoneVolume>(ZoneActor))
-		{
-			if (FVector::DistSquared(Zone->GetActorLocation(), MyLocation) <= FMath::Square(BlockedZoneRegisterRadius))
-			{
-				Zone->RegisterBlocker(this);
-				RegisteredBlockedZones.Add(Zone);
-			}
-		}
-	}
-}
-
-void AFactoryTransportRobot::OnBlockedTick(float DeltaTime)
-{
-	Super::OnBlockedTick(DeltaTime);
-
-	if (!bHasRegisteredBlocker)
-	{
-		bHasRegisteredBlocker = true;
-		OnEnterBlockedState();
-	}
-}
-
-void AFactoryTransportRobot::OnUnblocked()
-{
-	Super::OnUnblocked();
-
-	if (!bHasRegisteredBlocker)
-	{
-		return;
-	}
-
-	for (const TWeakObjectPtr<ACostZoneVolume>& ZoneRef : RegisteredBlockedZones)
-	{
-		if (ACostZoneVolume* Zone = ZoneRef.Get())
-		{
-			Zone->UnregisterBlocker(this);
-		}
-	}
-
-	RegisteredBlockedZones.Reset();
-	bHasRegisteredBlocker = false;
 }
 
 void AFactoryTransportRobot::OnTaskCompleted()

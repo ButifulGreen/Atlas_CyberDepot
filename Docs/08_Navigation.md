@@ -6,38 +6,18 @@
 
 극한 부하 테스트 중 NavMesh 코스트 기반 자유 이동이 진입각도에 따라 트레이 콜리전에 걸리는 버그가 발견됐고, 실제 대형 자동화 물류창고(아마존 로보틱스, 중국 Geek+/Quicktron류)가 자유 회피가 아니라 웨이포인트 그래프+예약 기반으로 동작한다는 점, 그리고 이 프로젝트의 AI 학습 데이터 생성 목적에 이 방식이 더 부합한다는 점을 근거로 이동 레이어를 둘로 나눴다.
 
-- **NPC(정비 인력)**: 아래 §8-A(NavArea/QueryFilter/CostZoneVolume, 자유 이동 + Detour Crowd 회피)를 그대로 사용. 고장 로봇이 어디서 발생할지 예측 불가능해 자유 이동이 맞다.
+- **NPC(정비 인력)**: 아래 §8-A(NavArea/QueryFilter, 자유 이동 + Detour Crowd 회피)를 그대로 사용. 고장 로봇이 어디서 발생할지 예측 불가능해 자유 이동이 맞다.
 - **아틀라스/운송로봇**: 거점 간 이동(선반/트레이/대기실 오가기)은 §8-B(웨이포인트 그래프 + 예약)로 전환. 작업구역 진입(그래프를 벗어난 마지막 접근, FinalHop) 이후에도 물리 이동 자체는 여전히 자유 Nav 제어(§8-A, 엔진 Detour Crowd)를 쓰지만, 좁은 구간에서 RVO가 로컬 미니멈(제자리 흔들림)에 빠지는 문제가 실제로 재현되어(회피 재설계, 아래 "FinalHop 전용 면 트레이스" 참고) §8-B 쪽에 전용 안전망을 추가했다 — RVO는 여유 공간에서의 매끄러운 스무딩 역할로 축소되고, 조밀한 구간의 정지/재개 판단은 이제 §8-B가 담당한다.
 
 ## §8-A. NavMesh 코스트 레이어 (NPC 전용 + 아틀라스 작업구역 내부)
 
 ### `UNavArea_MainLane` / `UNavArea_SideSpace` / `UNavArea_Critical` (UNavArea 상속)
-- `DefaultCost` 오버라이드만 다르게 설정 (1 / 10 / 100). 런타임에 액터가 이 클래스 자체를 교체하는 방식은 사용하지 않는다(아래 `ACostZoneVolume` 참고).
+- `DefaultCost` 오버라이드만 다르게 설정 (1 / 10 / 100). 정적 페인팅 값 그대로 쓰인다 — 런타임 코스트 조정은 하지 않는다.
 
 ### `UNavQueryFilter_Robot` / `UNavQueryFilter_NPC` (UNavigationQueryFilter 상속)
 - 로봇: MainLane 선호 / SideSpace 기피. NPC: 전 구역 동일 코스트.
 
-### `ACostZoneVolume` (AActor, 미리 배치되는 풀링 대상)
-런타임 NavArea 클래스 스왑 방식을 사용하지 않고, NavQueryFilter 런타임 코스트 조정 방식을 사용한다. Area Class를 런타임에 교체하면 해당 타일의 NavMesh가 비동기 재빌드되어(엔진 특성), 에이전트 수·교차로 수가 늘어날수록 GameThread/Navigation Tick 병목 위험이 커진다. 대신 이 볼륨은 "현재 이 구역이 얼마나 혼잡한가"라는 상태값만 들고 있고, 실제 코스트 반영은 각 에이전트의 `AFactoryAIController::ApplyDynamicCongestionCost`가 이동 요청 직전 자신의 `QueryFilterClass` 인스턴스에 AreaCost로 적용한다(`04_Agent_AI.md` 참고). NavMesh 지오메트리/Area 페인팅 자체는 정적으로 유지된다.
-
-- 멤버
-  - `TSubclassOf<UNavArea> AffectedAreaClass` (Docs 이탈 사항 — 이번에 반영. 이 존의 혼잡도 배수를 어느 NavArea 클래스에 적용할지 볼륨마다 레벨에서 지정)
-  - `int32 BlockerCount`
-  - `double LastChangeTimestamp`
-  - `float MinHoldTimeSeconds = 0.5f`
-  - `float CongestionCostMultiplier = 1.f` (`BlockerCount > 0`일 때 이 구역을 지나는 경로 요청에 적용할 코스트 배수. NavArea 클래스는 변경하지 않음)
-- 함수
-  - `void RegisterBlocker(AActor* Blocker)`
-  - `void UnregisterBlocker(AActor* Blocker)`
-  - `void TickPendingReset(float CurrentTime)`
-  - `float GetCurrentCostMultiplier() const` (`AFactoryAIController::ApplyDynamicCongestionCost`가 조회)
-
-### 구간별 세분화 컨벤션 (도심 교통 혼잡도 표현 방식)
-`AFactoryAIController::ApplyDynamicCongestionCost`의 코스트 오버라이드는 NavArea **클래스** 단위로 걸린다(`FactoryAIController.cpp`의 `ApplyAreaCostOverride`가 `AreaClass` 정확히 일치하는 항목만 갱신). 물리적으로 떨어진 통로 여러 곳이 전부 같은 `UNavArea_MainLane` 클래스로 페인팅돼 있으면, 한 통로의 혼잡이 무관한 다른 통로까지 코스트를 올려버린다.
-
-이를 막으려면 새 C++ 클래스를 추가하는 대신, 통로(물리적 세그먼트)마다 `UNavArea_MainLane`/`UNavArea_SideSpace`를 부모로 하는 **Blueprint 서브클래스**를 하나씩 만들어 그 통로에만 페인팅하고, 해당 통로의 `ACostZoneVolume::AffectedAreaClass`를 같은 서브클래스로 지정한다. 언리얼은 BP 서브클래스도 각각 별도 Area ID로 취급하므로, `TSubclassOf<UNavArea>` 기반 오버라이드가 자연히 그 통로에만 국한된다. 인접한 두 세그먼트의 NavModifierVolume은 경계 폴리곤이 빈틈없이 코스트 태그를 받도록 살짝 겹치게 배치할 것(안 그러면 경계가 코스트 0짜리 지름길이 될 수 있음).
-
-> **정리 후보**: 아틀라스/운송로봇의 주 이동이 §8-B로 넘어가면서 이 레이어는 사실상 NPC 전용(+ 아틀라스 작업구역 내부의 아주 짧은 구간)으로만 쓰인다. 코드는 그대로 두되, §8-B가 PIE에서 충분히 검증된 뒤 삭제 여부를 별도로 논의한다.
+> **삭제됨(재검토 후 확정)**: 런타임 혼잡도에 따라 이 NavQueryFilter들의 코스트를 동적으로 올려주던 `ACostZoneVolume`(AActor, 미리 배치되는 풀링 대상)/`AFactoryAIController::ApplyDynamicCongestionCost`를 제거했다. 유일한 등록 주체(`BlockerCount` 증가)였던 `AFactoryTransportRobot::OnBlockedTick`/`OnUnblocked`도 함께 제거 — 이 로봇이 실제로 멈추는 상황은 이미 §8-B의 웨이포인트 예약/`Pause`/재탐색 메커니즘이 처리한다. NPC는 3명뿐이라 애초에 동시다발 congestion 시나리오가 드물었고, 로봇-NPC 간 충돌 회피는 엔진 RVO와 `AFactoryAgentBase`의 안전거리 감지(`RunGraphSegmentTraceCheck`/`RunFinalHopAreaTraceCheck`, `Cast<AFactoryAgentBase>` 기반이라 `AFactoryNPCHuman`도 대상에 포함)가 이미 이중으로 처리하고 있어 삭제로 인한 손실이 없다고 판단했다(`Docs/14_OpenIssues.md` 참고).
 
 ## §8-B. 웨이포인트 그래프 + 예약 (아틀라스/운송로봇 거점 간 이동)
 
@@ -98,7 +78,7 @@
 
 **배경 — 왜 재설계했는가**: 기존엔 상대가 Working/Idle(의도된 정지)이면 회피를 전적으로 엔진 Detour Crowd(RVO)에 위임했는데, RVO는 매 틱 국소적으로만 후보 속도를 비교하는 반응형 알고리즘이라 "정지 로봇과 선반 사이처럼 좁은 틈"에 끼면 전역 우회 없이 제자리에서 흔들리기만 하는 로컬 미니멈에 빠질 수 있었다(실제 재현). `TravelPhase`에 따라 서로 다른 판정 레이어를 쓴다 — 그래프 구간(`TraversingGraph`)은 넓은 공용 통로라 정상 상황에선 RVO만으로 충분하지만, FinalHop(그래프를 벗어난 마지막 접근)은 조밀해서 별도 판정이 필요하다.
 
-**`EAgentState::Pause`** — "대기+재확인" 전용 상태(리플리케이트되는 기존 `EAgentState` 끝에 추가). 예전엔 `bYieldingForSafety`라는 bool을 `Moving` 위에 얹어 표현했는데, 그러면 `Moving`이 "이동 의도"와 "실제 이동 중"을 동시에 뜻해 AI 학습 데이터로서의 가치가 떨어졌다 — 이제 `Moving`은 실제로 움직이는 중일 때만 쓴다. `AFactoryAgentBase::Tick`의 Blocked 판정(`ACostZoneVolume` 등록/해제용, §8-A)도 `Moving`과 함께 `Pause`를 대상에 포함한다.
+**`EAgentState::Pause`** — "대기+재확인" 전용 상태(리플리케이트되는 기존 `EAgentState` 끝에 추가). 예전엔 `bYieldingForSafety`라는 bool을 `Moving` 위에 얹어 표현했는데, 그러면 `Moving`이 "이동 의도"와 "실제 이동 중"을 동시에 뜻해 AI 학습 데이터로서의 가치가 떨어졌다 — 이제 `Moving`은 실제로 움직이는 중일 때만 쓴다. `AFactoryAgentBase::Tick`의 Blocked 판정(정적 지오메트리 정지 감지용 최후의 안전망, 아래 참고)도 `Moving`과 함께 `Pause`를 대상에 포함한다.
 
 **그래프 구간 — `RunGraphSegmentTraceCheck`**:
 - `USafetyTraceMarkerComponent`(`USceneComponent` 상속, `UStorageSlotMarkerComponent`와 동일한 마커 패턴) 각각의 위치/전방 벡터로 `SafetyTraceIntervalSeconds`(기본 1초, 에디터 조정 가능)마다 `SafeDistanceUnits`(웨이포인트 최장 변보다 살짝 길게 잡을 것 — 에디터 조정 가능)까지 라인트레이스(`ECC_Pawn`). 마커가 없으면(과도기) 이동 방향 1개로 대체. 여러 마커/한 트레이스에 여러 대상이 걸릴 수 있어 전체에서 가장 가까운 히트 하나만 채택한다.

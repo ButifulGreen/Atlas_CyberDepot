@@ -72,7 +72,7 @@ public:
 
 	// 7단계 후속 — 선입선출 없이 실행 시 1회만 고정 배정되는 홈 대기실/슬롯. UOutboundDispatchSubsystem::
 	// AssignHomeIdleZoneSlots가 레벨 시작 시 채운 뒤로는 세션 내내 그대로 유지된다(리플리케이트 안 함 —
-	// CurrentAssignment/PendingHandoffAssignmentID와 동일하게 서버 전용 부기 값).
+	// CurrentAssignment와 동일하게 서버 전용 부기 값).
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	TWeakObjectPtr<AIdleWaitingZone> HomeIdleZone;
 
@@ -85,8 +85,6 @@ public:
 	bool bIsHeadingToIdleZone = false;
 
 	virtual void SetState(EAgentState NewState);
-	virtual void OnBlockedTick(float DeltaTime);
-	virtual void OnUnblocked();
 	FStateSnapshot ToSnapshot() const;
 
 	// 7단계 후속 — AIdleWaitingZone::AssignHomeSlots가 호출해 HomeIdleZone/HomeSlotIndex를 채운다.

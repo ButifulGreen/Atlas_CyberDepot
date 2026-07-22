@@ -9,7 +9,6 @@
 
 class ALogisticsItem;
 class URepairProgressComponent;
-class ACostZoneVolume;
 class UStaticMeshComponent;
 class AHorizontalTray;
 
@@ -22,10 +21,6 @@ class AFactoryTransportRobot : public AFactoryAgentBase
 
 public:
 	AFactoryTransportRobot();
-
-	// 정지 상태가 이 반경 안의 ACostZoneVolume에 혼잡도로 반영되는 거리 (Docs에 없는 구현값)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Congestion")
-	float BlockedZoneRegisterRadius = 300.f;
 
 	// 디버깅 편의 — VisibleAnywhere 없이는 디테일 패널에 안 뜬다.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
@@ -77,8 +72,6 @@ public:
 	virtual void ResumeAfterRepair() override;
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
 	virtual void DebugForceBreakdown() override { TriggerBreakdown(); }
-	virtual void OnBlockedTick(float DeltaTime) override;
-	virtual void OnUnblocked() override;
 	virtual void OnArrivedAtDestination() override;
 	virtual void OnMoveFailedPermanently() override;
 	// 안전거리/FinalHop 트레이스가 이번 트립의 짝(아틀라스)을 장애물로 오인해 접근을 멈추지 않도록 제외.
@@ -95,7 +88,6 @@ public:
 	bool IsEligibleForQuickCheck() const;
 	void AcceptTransportTask(const FTransportTask& Task);
 	void EvaluateRotationOrContinue();
-	void OnEnterBlockedState();
 	void OnTaskCompleted();
 
 	// 6단계 신규 — 배송로봇은 트레이/선반을 직접 건드리지 않고, 아틀라스가 소켓으로 직접 주고받는다.
@@ -134,12 +126,6 @@ private:
 	// 현재 점유 중인 트레이 예약이 있으면 반납. 다음 목적지로 넘어갈 때(TryStartMoveToPoint 진입 시)와
 	// 트립이 완전히 끝날 때(OnItemCollectedByAtlas) 둘 다 호출해 항상 반납되도록 한다.
 	void ReleaseReservedTrayZone();
-
-	// OnBlockedTick 진입 엣지(1회)에서만 OnEnterBlockedState()를 호출하기 위한 플래그.
-	bool bHasRegisteredBlocker = false;
-
-	// OnEnterBlockedState에서 등록한 존들을 기억해뒀다가 OnUnblocked에서 그대로 해제한다.
-	TArray<TWeakObjectPtr<ACostZoneVolume>> RegisteredBlockedZones;
 
 	// 버그 수정 — 배송로봇은 스켈레탈 메시가 없는(ACharacter::GetMesh()가 항상 빈) 모델이라, 물품 소켓
 	// ("ItemSocket")은 실제로 BP에 추가된 스태틱 메시 컴포넌트 쪽에 있다. BeginPlay에서 그 컴포넌트를

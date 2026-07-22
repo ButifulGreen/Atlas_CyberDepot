@@ -30,7 +30,7 @@ void AFactoryAgentBase::Tick(float DeltaTime)
 		OnWorkingTick(DeltaTime);
 	}
 
-	// Blocked 판정과 그에 따른 ACostZoneVolume 등록/해제는 서버 권한 로직이라 서버에서만 수행한다.
+	// 정적 지오메트리 정지 감지(최후의 안전망)는 서버 권한 로직이라 서버에서만 수행한다.
 	// Pause(안전거리/FinalHop 트레이스로 대기 중)도 Moving과 함께 대상에 포함 — 정지 이유가 다를 뿐
 	// 여전히 "이동 의도가 있는데 못 가는 중"이라 같은 판정을 받아야 한다.
 	if (!HasAuthority() || (CurrentState != EAgentState::Moving && CurrentState != EAgentState::Pause))
@@ -43,10 +43,6 @@ void AFactoryAgentBase::Tick(float DeltaTime)
 	const bool bIsStationary = GetVelocity().SizeSquared() < KINDA_SMALL_NUMBER;
 	if (!bIsStationary)
 	{
-		if (BlockedTimer >= BlockedThresholdSeconds)
-		{
-			OnUnblocked();
-		}
 		BlockedTimer = 0.f;
 		LastBlockedRecoveryAttemptSeconds = 0.f;
 		return;
@@ -55,8 +51,6 @@ void AFactoryAgentBase::Tick(float DeltaTime)
 	BlockedTimer += DeltaTime;
 	if (BlockedTimer >= BlockedThresholdSeconds)
 	{
-		OnBlockedTick(DeltaTime);
-
 		// 버그 수정(사용자 요청, 대비책) — 그래프 구간/FinalHop 안전 트레이스 둘 다 AFactoryAgentBase
 		// 파생 액터만 감지 대상이라(Cast 실패 시 그냥 무시), 선반 같은 정적 지오메트리에 막히면 아무
 		// 것도 감지되지 않아 Pause도 안 걸리고 영구 정지할 수 있다. Pause(대기+재확인, 자체 타임아웃 로직
@@ -134,14 +128,6 @@ void AFactoryAgentBase::SetState(EAgentState NewState)
 	{
 		OnRep_CurrentState();
 	}
-}
-
-void AFactoryAgentBase::OnBlockedTick(float DeltaTime)
-{
-}
-
-void AFactoryAgentBase::OnUnblocked()
-{
 }
 
 void AFactoryAgentBase::AssignHomeIdleZoneSlot(AIdleWaitingZone* Zone, int32 SlotIndex)
