@@ -156,6 +156,11 @@ void AFactoryNPCHuman::ReleasePossession()
 	// 쥐고 있던 기존(플레이어) 컨트롤러의 UnPossess()가 먼저 자동으로 불린다 — 아래 UnPossessed()가
 	// 그 경로로 자연스럽게 실행되어 정비 참여 정리를 별도 호출 없이 처리한다.
 	SpawnDefaultController();
+
+	// 버그 수정(사용자 리포트) — StartPatrol()은 레벨 시작 시 BP BeginPlay에서 1회만 호출되는 구조라,
+	// 빙의→해제를 거치면 순찰을 다시 시작시킬 트리거가 전혀 없어 CurrentState==Idle에 영구히 멈춰있었다.
+	// CallToOfficeExit()로 PatrolState를 InOffice로 리셋하고 강제로 순찰을 재개시킨다.
+	CallToOfficeExit();
 }
 
 void AFactoryNPCHuman::PossessedBy(AController* NewController)

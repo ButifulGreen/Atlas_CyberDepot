@@ -10,6 +10,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/DataTable.h"
 #include "Net/UnrealNetwork.h"
+#include "GameFramework/PlayerController.h"
 
 void AMSmartFactoryManager::BeginPlay()
 {
@@ -117,8 +118,11 @@ AFactoryNPCHuman* AMSmartFactoryManager::FindNearestAvailableNPC(const FVector& 
 	for (AActor* Actor : FoundNPCs)
 	{
 		AFactoryNPCHuman* NPC = Cast<AFactoryNPCHuman>(Actor);
-		// 이미 정비 중인 NPC는 제외한다. 플레이어 빙의 여부까지 구분하는 건 8단계 멀티플레이어에서 정교화한다.
-		if (!NPC || NPC->CurrentState == EAgentState::UnderRepair)
+		// 이미 정비 중인 NPC와, 플레이어가 빙의 중인 NPC는 배정 후보에서 제외한다(8단계 멀티플레이어 정교화,
+		// 사용자 지시 2026-07-22) — 빙의 중엔 컨트롤러가 AFactoryPlayerController라 AssignMaintenance의 이동
+		// 요청이 조용히 무시되면서도 상태 전환/정비 참여는 그대로 진행돼, 플레이어가 조작 중인 NPC가 본인도
+		// 모르게 다른 로봇의 정비 인원으로 잡히는 문제가 있었다.
+		if (!NPC || NPC->CurrentState == EAgentState::UnderRepair || Cast<APlayerController>(NPC->GetController()))
 		{
 			continue;
 		}

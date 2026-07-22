@@ -48,8 +48,17 @@ void AFactoryPlayerController::Server_ReleaseNPC_Implementation()
 		return;
 	}
 
-	PossessedNPC->ReleasePossession();
+	// 버그 수정(사용자 리포트, 근본 원인) — 순서가 반대였다. ReleasePossession()을 먼저 부르면 그 안의
+	// SpawnDefaultController() 시점에 PossessedNPC->Controller가 여전히 이 PlayerController(this)를
+	// 가리키고 있어, APawn::SpawnDefaultController()의 "Controller != nullptr이면 즉시 반환" 가드에 걸려
+	// 아무 일도 안 했다 — NPC는 AI 컨트롤러를 영영 못 받고 Controller == nullptr로 남았다. 상태 전환/정비
+	// 참여는 컨트롤러 없이도 동작해 겉으로는 "작동하는 것처럼" 보였지만, StartPatrol/AssignMaintenance의
+	// Cast<AFactoryAIController>(GetController())가 매번 조용히 실패해 이동 요청 자체가 나간 적이 없었다.
+	// Possess(TargetSpectatorPawn)을 먼저 호출해 이 컨트롤러가 PossessedNPC를 실제로 놓아주고 나서(내부적으로
+	// UnPossess()가 불려 Controller가 null로 정리됨) ReleasePossession()을 불러야 SpawnDefaultController()가
+	// 정상적으로 새 AI 컨트롤러를 생성·빙의시킨다.
 	Possess(TargetSpectatorPawn);
+	PossessedNPC->ReleasePossession();
 }
 
 void AFactoryPlayerController::Server_SubmitKioskOrder_Implementation(AFactoryKioskTerminal* SourceKiosk, FKioskOrderRequest Request)
