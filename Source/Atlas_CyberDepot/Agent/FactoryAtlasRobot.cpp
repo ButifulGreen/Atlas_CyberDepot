@@ -78,7 +78,7 @@ float AFactoryAtlasRobot::ComputeCurrentBreakdownChance() const
 	return FMath::Min(Chance, MaxBreakdownChanceCap);
 }
 
-void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff)
+void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assignment, const FPendingSlotReservation* InheritedSlot)
 {
 	LeaveIdleZoneIfParked();
 	// 버그 수정 — 웨이포인트 그래프로 이동하던 도중(대기실行 등) 새 배정이 끼어들면, 그때 쥐고 있던 노드
@@ -88,14 +88,45 @@ void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assig
 
 	CurrentAssignment = Assignment;
 
-	if (bIsHandoff)
+	if (InheritedSlot)
 	{
-		// 핸드오프 인수는 대기실/교대 자체가 이번 스코프 밖이라 실사용되지 않는다.
-		// (Outbound 핸드오프는 슬롯이 아닌 스테이징에서 시작해 정합성이 완전하지 않음 — Docs/14_OpenIssues.md 참고)
-		return;
-	}
+		// 버그 수정(사용자 지시, 소프트 핸드오프 폐기) — 예전엔 여기서 그냥 return해 핸드오프 인수가 실제로는
+		// 동작하지 않았다(대체 아틀라스가 스테이징 지점에 도착해도 도착 신호가 채워지지 않아 아무 일도
+		// 안 일어남). 이제 From이 멈춘 바로 그 슬롯/트립(InheritedSlot)을 그대로 물려받아 존 재예약·새 슬롯
+		// 팝 없이 곧장 실제 작업 위치로 이동한다.
+		PendingSlotReservation = *InheritedSlot;
 
-	StartCurrentAssignment();
+		AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController());
+		if (!AIController)
+		{
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] AcceptStationAssignment(핸드오프) 실패 — AFactoryAIController가 없음"), *GetName());
+			return;
+		}
+
+		SetState(EAgentState::Moving);
+		IgnoreTransportRobotForCurrentTrip(AIController);
+
+		FVector Destination;
+		if (AHorizontalTray* Tray = Cast<AHorizontalTray>(CurrentAssignment.TargetZoneOwner.Get()))
+		{
+			Destination = Tray->GetAtlasWorkLocation();
+		}
+		else if (AStorageShelf* Shelf = Cast<AStorageShelf>(CurrentAssignment.TargetZoneOwner.Get()))
+		{
+			Destination = Shelf->GetAtlasWorkLocation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, CurrentAssignment.ZoneType);
+		}
+		else
+		{
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] AcceptStationAssignment(핸드오프) 실패 — TargetZoneOwner가 Tray도 Shelf도 아님"), *GetName());
+			return;
+		}
+
+		TryRequestWaypointRoute(nullptr, Destination);
+	}
+	else
+	{
+		StartCurrentAssignment();
+	}
 
 	if (UGameInstance* GI = GetGameInstance())
 	{
@@ -182,6 +213,20 @@ void AFactoryAtlasRobot::EvaluateRotationOrContinue()
 	}
 
 	// 교대 가능한 로봇을 못 찾으면 기존 배정을 유지한 채 계속 진행한다.
+}
+
+void AFactoryAtlasRobot::HandOffCurrentAssignmentAndRest()
+{
+	// 버그 수정(사용자 지시, 소프트 핸드오프 폐기) — 대체 아틀라스가 도착할 때까지 기다리지 않고, 핸드오프가
+	// 결정된 바로 그 순간 자리를 비운다. Dispatch->TryDispatchIdleAgents() 같은 재배정 스윕을 거치면 다른
+	// 대기 작업을 집어 계속 일할 수 있어(정비가 필요해서 교대한 취지가 무색해짐) 곧장 대기실로만 보낸다.
+	AbandonAnyActiveWaypointRoute();
+
+	CurrentAssignment = FStationAssignment();
+	PendingSlotReservation = FPendingSlotReservation();
+
+	SetState(EAgentState::Idle);
+	TryHeadToIdleZone();
 }
 
 bool AFactoryAtlasRobot::PopNextReservedSlot()
@@ -361,18 +406,6 @@ void AFactoryAtlasRobot::OnArrivedAtDestination()
 
 	if (TryHandleIdleZoneArrival())
 	{
-		return;
-	}
-
-	if (PendingHandoffAssignmentID.IsValid())
-	{
-		const FGuid AssignmentID = PendingHandoffAssignmentID;
-		PendingHandoffAssignmentID.Invalidate();
-
-		if (UOutboundDispatchSubsystem* Dispatch = GetWorld()->GetSubsystem<UOutboundDispatchSubsystem>())
-		{
-			Dispatch->OnHandoffAtlasArrivedAtStagingPoint(AssignmentID);
-		}
 		return;
 	}
 

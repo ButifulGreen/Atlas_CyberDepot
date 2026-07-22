@@ -26,14 +26,11 @@
   - `int32 MaxConcurrentAtlas = 4` (Docs 이탈, 승인됨 — Balance|WorkZone, `00_DesignPrinciples.md` 참고. 원래 "아틀라스 1대 거점 고정"이었으나 실측 튜닝을 위해 에디터 조정 가능한 동시 진입 수로 확장. 1로 두면 기존 동작과 동일)
   - `TArray<TWeakObjectPtr<AFactoryAgentBase>> InboundZoneOccupants` (좌측 구역, `MaxConcurrentAtlas`까지 동시 점유. `TArray<TWeakObjectPtr<T>>`는 UHT가 블루프린트 노출을 지원하지 않아 BlueprintReadOnly 미지정)
   - `TArray<TWeakObjectPtr<AFactoryAgentBase>> OutboundZoneOccupants` (우측 구역, 동일)
-  - `TArray<TObjectPtr<AFactoryNavWaypoint>> TransportRobotInboundDocks` / `TransportRobotOutboundDocks` (Docs 이탈, 승인됨 — `08_Navigation.md` §8-B. 운송로봇 전용 도킹 웨이포인트, `SlotIndex`(1-based)로 인덱싱하며 `NumSlotsPerFloor`(9)개까지 배치)
-  - `UInboundStagingMarkerComponent* InboundStagingMarker`, `UOutboundStagingMarkerComponent* OutboundStagingMarker` (설계 변경 — 배송로봇↔아틀라스 메인 사이클 핸드오프는 더 이상 이 지점을 쓰지 않는다. 슬롯별 (X,Y) 위치에서 직접 만나는 방식으로 바뀌었고, 이 마커는 이제 `07_TaskAssignment.md`의 소프트 핸드오프(교대/로테이션, 대기실 미배치로 현재 미사용)에서 대체 아틀라스가 대기하는 지점으로만 쓰인다. 버그 수정 — 원래 순수 `FTransform` 프로퍼티였는데 뷰포트에 기즈모가 안 보이고 기본값이 월드 원점이라 배치를 깜빡하기 쉬웠다. 슬롯 마커와 동일한 패턴의 씬 컴포넌트로 변경, `GetInboundStagingLocation()`/`GetOutboundStagingLocation()`으로 조회)
 - 함수
   - `bool TryReserveInboundZone(AFactoryAtlasRobot* Atlas)` / `void ReleaseInboundZone(AFactoryAgentBase* Atlas)` (버그 수정 — 동시 다수 점유로 바뀌면서 "누가" 반납하는지가 필요해져 `Release*Zone`에 인자 추가)
   - `bool TryReserveOutboundZone(AFactoryAtlasRobot* Atlas)` / `void ReleaseOutboundZone(AFactoryAgentBase* Atlas)`
   - `bool IsZoneFull(EWorkZoneType ZoneType) const` (Docs 이탈, 승인됨 — `Occupants.Num() >= MaxConcurrentAtlas`. `UOutboundDispatchSubsystem::IsZoneOccupied`가 배정 시점 만석 판정에 재사용)
-  - `AFactoryNavWaypoint* GetTransportRobotDock(int32 SlotIndex, EWorkZoneType ZoneType) const` (Docs 이탈, 승인됨 — `SlotIndex`(1-based)에 대응하는 도킹 웨이포인트 조회, 배선 안 됐으면 nullptr)
-  - `bool TryReserveEmptySlot(int32& OutFloorIndex, int32& OutSlotIndex)` (입고 측, 품목 슬롯 단위로만 경합 방지. 물리적 도킹 충돌 방지는 위 `TransportRobotInboundDocks`가 별도로 담당)
+  - `bool TryReserveEmptySlot(int32& OutFloorIndex, int32& OutSlotIndex)` (입고 측, 품목 슬롯 단위로만 경합 방지)
   - `bool TryReserveOldestOccupiedSlot(int32& OutFloorIndex, int32& OutSlotIndex, ALogisticsItem*& OutItem)` (출고 측, 전체 슬롯 중 `EnteredTimestamp` 최솟값 탐색)
   - `void ConfirmInbound(int32 FloorIndex, int32 SlotIndex, ALogisticsItem* Item)`
   - `void ConfirmOutboundRemoved(int32 FloorIndex, int32 SlotIndex)`

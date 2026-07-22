@@ -520,56 +520,27 @@ void UOutboundDispatchSubsystem::HandoffStationAssignment(const FGuid& Assignmen
 		return;
 	}
 
-	FPendingHandoff Handoff;
-	Handoff.AssignmentID = AssignmentID;
-	Handoff.From = From;
-	Handoff.To = To;
-	Handoff.ZoneType = Assignment->ZoneType;
-	PendingHandoffs.Add(AssignmentID, Handoff);
+	// 버그 수정(사용자 지시, 소프트 핸드오프 폐기) — 대체 아틀라스를 스테이징 지점으로 보내고 도착할 때까지
+	// From이 자리를 지키는 방식은, 실제로는 도착 신호(PendingHandoffAssignmentID)가 어디서도 채워지지 않아
+	// To가 스테이징 지점에서 영구 정지하는 결함이 있었다(From은 통보를 못 받아 계속 일해 선반에 로봇 2대가
+	// 남는 것처럼 보임 — 실기 테스트로 확인). 현장에서는 고장 위험을 감수하기보다 안전하게 즉시 교대하는
+	// 편이 맞다는 판단에 따라, 결정 즉시 동시에 자리를 바꾼다.
+	const FPendingSlotReservation InheritedSlot = From->PendingSlotReservation;
 
 	if (AStorageShelf* Shelf = Cast<AStorageShelf>(Assignment->TargetZoneOwner.Get()))
 	{
-		const FVector StagingLocation = (Assignment->ZoneType == EWorkZoneType::ShelfInboundZone)
-			? Shelf->GetInboundStagingLocation()
-			: Shelf->GetOutboundStagingLocation();
-
-		if (AFactoryAIController* AIController = Cast<AFactoryAIController>(To->GetController()))
-		{
-			AIController->RequestMoveWithFilter(StagingLocation);
-		}
+		Shelf->TransferZoneOccupancy(Assignment->ZoneType, From, To);
 	}
-}
-
-void UOutboundDispatchSubsystem::OnHandoffAtlasArrivedAtStagingPoint(const FGuid& AssignmentID)
-{
-	FPendingHandoff* Handoff = PendingHandoffs.Find(AssignmentID);
-	if (!Handoff)
+	else if (AHorizontalTray* Tray = Cast<AHorizontalTray>(Assignment->TargetZoneOwner.Get()))
 	{
-		return;
+		Tray->ReleaseWorkZone();
+		Tray->TryReserveWorkZone(To);
 	}
 
-	FStationAssignment* Assignment = ActiveStationAssignments.FindByPredicate([&AssignmentID](const FStationAssignment& A)
-	{
-		return A.AssignmentID == AssignmentID;
-	});
+	Assignment->AssignedAtlas = To;
 
-	if (Assignment)
-	{
-		if (AStorageShelf* Shelf = Cast<AStorageShelf>(Assignment->TargetZoneOwner.Get()))
-		{
-			Shelf->TransferZoneOccupancy(Assignment->ZoneType, Handoff->From.Get(), Handoff->To.Get());
-		}
-
-		Assignment->AssignedAtlas = Handoff->To;
-
-		if (AFactoryAtlasRobot* To = Handoff->To.Get())
-		{
-			To->AcceptStationAssignment(*Assignment, true);
-		}
-	}
-
-	// From을 대기실로 이동시키는 처리(대기실 탐색/슬롯 예약)는 배차 로직이 정교화되는 이후 단계에서 연결한다.
-	PendingHandoffs.Remove(AssignmentID);
+	To->AcceptStationAssignment(*Assignment, &InheritedSlot);
+	From->HandOffCurrentAssignmentAndRest();
 }
 
 void UOutboundDispatchSubsystem::OnStationAssignmentCompleted(const FGuid& AssignmentID)
@@ -611,7 +582,7 @@ void UOutboundDispatchSubsystem::OnStationAssignmentCompleted(const FGuid& Assig
 
 void UOutboundDispatchSubsystem::RequeueStationAssignment(FStationAssignment Assignment)
 {
-	// 새 AssignmentID 발급 — 이 값을 참조하는 PendingHandoffs 등이 죽은 배정을 잘못 가리키지 않게 한다.
+	// 새 AssignmentID 발급 — 죽은 배정을 잘못 가리키는 참조가 남지 않게 한다.
 	Assignment.AssignmentID = FGuid::NewGuid();
 	Assignment.AssignedAtlas.Reset();
 	ActiveStationAssignments.Add(Assignment);

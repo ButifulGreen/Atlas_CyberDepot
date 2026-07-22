@@ -19,30 +19,6 @@ void AStorageShelf::BeginPlay()
 	Super::BeginPlay();
 
 	GetComponents<UStorageSlotMarkerComponent>(SlotMarkers);
-	InboundStagingMarker = FindComponentByClass<UInboundStagingMarkerComponent>();
-	OutboundStagingMarker = FindComponentByClass<UOutboundStagingMarkerComponent>();
-}
-
-FVector AStorageShelf::GetInboundStagingLocation() const
-{
-	if (InboundStagingMarker)
-	{
-		return InboundStagingMarker->GetComponentLocation();
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("AStorageShelf::GetInboundStagingLocation: InboundStagingMarker 컴포넌트가 없어 선반 자신의 위치로 대체합니다 (%s)"), *GetName());
-	return GetActorLocation();
-}
-
-FVector AStorageShelf::GetOutboundStagingLocation() const
-{
-	if (OutboundStagingMarker)
-	{
-		return OutboundStagingMarker->GetComponentLocation();
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("AStorageShelf::GetOutboundStagingLocation: OutboundStagingMarker 컴포넌트가 없어 선반 자신의 위치로 대체합니다 (%s)"), *GetName());
-	return GetActorLocation();
 }
 
 FTransform AStorageShelf::GetSlotMarkerTransform(int32 FloorIndex, int32 SlotIndex) const
