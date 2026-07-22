@@ -42,6 +42,12 @@ public:
 	UFUNCTION(BlueprintCallable)
 	bool TryPlaceOrder(EItemType ItemType, int32 Quantity);
 
+	// 금액 산정 시스템 신규 — 플레이어 주문 UI 전용. A/B/C 수량을 한 번에 제출해 쿨다운/자금 체크를 합산 1회만
+	// 수행한다(EOrderRequestType::InboundBatch, Docs/03_InventoryOrder.md 참고). 수량이 0 이하이거나 해당
+	// 재고 라인이 잠겨있는 품목은 조용히 건너뛴다 — 나머지 품목은 정상 처리된다.
+	UFUNCTION(BlueprintCallable)
+	bool TryPlaceBatchOrder(int32 QuantityA, int32 QuantityB, int32 QuantityC);
+
 	// Docs에 없는 구현값 — UDeliveryOrderSubsystem::TryPlaceTestOrder와 동일한 취지의 입고 쪽 테스트용.
 	// 비용/쿨다운을 건너뛰고 물리적으로 즉시 적재한다 — 여러 품목을 한 프레임에 연달아 호출해도(전역 쿨다운에
 	// 안 걸리므로) 전부 성공한다. 재고 잠금(bIsLineLocked)만은 그대로 체크.

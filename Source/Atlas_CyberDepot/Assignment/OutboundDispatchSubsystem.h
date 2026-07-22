@@ -15,24 +15,6 @@ class AStorageShelf;
 class AIdleWaitingZone;
 struct FDeliveryOrder;
 
-USTRUCT()
-struct FPendingHandoff
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	FGuid AssignmentID;
-
-	UPROPERTY()
-	TWeakObjectPtr<AFactoryAtlasRobot> From;
-
-	UPROPERTY()
-	TWeakObjectPtr<AFactoryAtlasRobot> To;
-
-	UPROPERTY()
-	EWorkZoneType ZoneType = EWorkZoneType::ShelfInboundZone;
-};
-
 // Docs/07_TaskAssignment.md §7 — 6단계 대상. 06_Infrastructure.md, 04_Agent_AI.md가 먼저 준비돼 있어야 한다.
 UCLASS()
 class UOutboundDispatchSubsystem : public UWorldSubsystem
@@ -46,16 +28,12 @@ public:
 	UPROPERTY(BlueprintReadOnly)
 	TArray<FTransportTask> PendingTransportTasks;
 
-	UPROPERTY()
-	TMap<FGuid, FPendingHandoff> PendingHandoffs;
-
 	void DecomposeOrder(const FDeliveryOrder& Order);
 	// 8단계 — 해당 주문에서 파생된 작업이 전부 미배정 상태일 때만 제거하고 true 반환, 하나라도 배정됐으면 false
 	bool TryCancelAssignmentsForOrder(const FGuid& OrderID);
 	bool TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, FStationAssignment& OutAssignment);
 	bool TryAssignIdleTransportRobot(AFactoryTransportRobot* Robot, FTransportTask& OutTask);
 	void HandoffStationAssignment(const FGuid& AssignmentID, AFactoryAtlasRobot* From, AFactoryAtlasRobot* To);
-	void OnHandoffAtlasArrivedAtStagingPoint(const FGuid& AssignmentID);
 	void OnStationAssignmentCompleted(const FGuid& AssignmentID);
 
 	// 버그 수정(사용자 지시, 근본 원인인 회피 국소최소 문제와 별개로 우선 반영) — OnMoveFailedPermanently는

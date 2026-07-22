@@ -34,9 +34,6 @@ public:
 	UFUNCTION(Server, Reliable)
 	void Server_LeaveRepair(UActorComponent* TargetRepairComponent);
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Kiosk")
-	float KioskInteractRadius = 200.f;
-
 protected:
 	virtual void OnPossess(APawn* InPawn) override;
 

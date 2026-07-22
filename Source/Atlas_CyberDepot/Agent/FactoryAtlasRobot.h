@@ -78,11 +78,6 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	FPendingSlotReservation PendingSlotReservation;
 
-	// 6단계 신규 — HandoffStationAssignment가 이동 요청 전 채워 넣는, 아직 도착하지 않은 핸드오프 배정 ID.
-	// OnArrivedAtDestination에서 이 값이 유효하면 일반 작업 로직 대신 핸드오프 도착 처리를 우선한다.
-	UPROPERTY(BlueprintReadOnly)
-	FGuid PendingHandoffAssignmentID;
-
 	UPROPERTY()
 	TObjectPtr<URepairProgressComponent> RepairComponent;
 
@@ -122,8 +117,14 @@ public:
 	// 정비 중인 NPC(Broken)가 선반 접근을 막을 때, 대안 칸이 있으면 그리로 재할당(성공 시 true).
 	virtual bool TryHandleFinalHopBrokenBlock(AFactoryAgentBase* BrokenAgent) override;
 	bool IsEligibleForQuickCheck() const;
-	void AcceptStationAssignment(const FStationAssignment& Assignment, bool bIsHandoff = false);
+	// 버그 수정(사용자 지시, 소프트 핸드오프 폐기) — InheritedSlot이 있으면 교대로 대체 아틀라스가 From이
+	// 멈춘 바로 그 슬롯/트립부터 곧장 이어받는다(존 재예약·새 슬롯 팝 없이 그 자리에서 실제 작업 위치로 이동).
+	void AcceptStationAssignment(const FStationAssignment& Assignment, const FPendingSlotReservation* InheritedSlot = nullptr);
 	void EvaluateRotationOrContinue();
+	// 버그 수정(사용자 지시, 소프트 핸드오프 폐기) — HandoffStationAssignment가 대체 아틀라스에게 자리를
+	// 넘긴 것과 동시에 호출. 배정/슬롯 상태를 즉시 비우고 대기실로 향한다(재배정 스윕을 거치지 않아
+	// 다른 대기 작업으로 새지 않고 곧장 쉬러 간다).
+	void HandOffCurrentAssignmentAndRest();
 	bool TransferItem(AActor* Source, AActor* Destination);
 	void OnAssignmentExhausted();
 	void OnTaskCompleted();

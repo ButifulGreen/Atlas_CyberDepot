@@ -7,8 +7,7 @@
 #include "FactoryNavQueryFilters.generated.h"
 
 // Docs/08_Navigation.md §8 — 3단계 대상. 로봇: MainLane 선호/SideSpace 기피. NPC: 전 구역 동일 코스트.
-// bInstantiateForQuerier = true로 설정해 AFactoryAIController::ApplyDynamicCongestionCost가
-// 매 이동 요청 직전 CDO의 Areas를 고쳐도 그 값이 캐싱 없이 매번 새로 반영되게 한다.
+// 정적 페인팅 값(DefaultCost)만 쓰는 고정 코스트 필터 — 런타임 코스트 조정(동적 혼잡 코스트)은 없다.
 
 UCLASS()
 class UNavQueryFilter_Robot : public UNavigationQueryFilter

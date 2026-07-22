@@ -36,10 +36,6 @@
 - `OnArrivedAtDestination()`은 `SetState(Working)`으로 그 자리에 파킹할 뿐, 트레이/선반을 스스로 건드리지 않는다.
 - `OnItemGivenByAtlas(Item)`: 아틀라스가 물품을 건네줄 때 호출 — 소켓 부착 + `DropoffPoint` 방향(같은 방식으로 슬롯 위치 계산)으로 이동 재개.
 - `OnItemCollectedByAtlas()`: 아틀라스가 물품을 가져갈 때 호출 — 비우고 `OnTaskCompleted()`(카운트 증가, 이벤트 발행, `Dispatch->TryAssignIdleTransportRobot`로 다음 트립 스스로 수령).
-- Blocked 판정(`AFactoryAgentBase::Tick`이 `BlockedThresholdSeconds` 경과를 감지)이 `OnBlockedTick`을 부르면 `OnEnterBlockedState()`로 `ACostZoneVolume::RegisterBlocker`를 1회 등록하고, `OnUnblocked()`에서 동일 존들에 `UnregisterBlocker`를 호출해 해제한다.
-
-> **참고**: `AStorageShelf::InboundStagingMarker`/`OutboundStagingMarker`(및 `GetInboundStagingLocation`/`GetOutboundStagingLocation`)는 위 메인 사이클에서는 더 이상 쓰이지 않는다. 아래 `HandoffStationAssignment`(교대/로테이션, 대기실 미배치로 현재 미사용)에서만 "대체 아틀라스가 대기하는 지점"으로 여전히 사용된다.
-
 ### `EWorkZoneType` (enum)
 - `ShelfInboundZone`, `ShelfOutboundZone`, `TrayWorkZone`(트레이 쪽 아틀라스 배정 — 6단계에서 실제로 생성되기 시작함)
 
@@ -64,14 +60,7 @@
 - `EItemType ItemType`
 - `int32 FloorIndex`, `int32 SlotIndex` (버그 수정 — 배송로봇도 층과 무관하게 슬롯의 (X,Y) 위치로 직접 이동해야 해서 추가. `FStationAssignment::ReservedSlots`와 같은 시점에 같은 슬롯으로 예약된다. Tray 쪽 지점만 관여하는 트립이면 -1로 남는다)
 
-### `FPendingHandoff` (USTRUCT)
-소프트 핸드오프 진행 중인 교대 건을 추적한다. To가 스테이징 지점에 도착하기 전까지는 From이 계속 실제 거점을 점유한다.
-- `FGuid AssignmentID`
-- `TWeakObjectPtr<AFactoryAtlasRobot> From`
-- `TWeakObjectPtr<AFactoryAtlasRobot> To`
-- `EWorkZoneType ZoneType`
-
-> **알려진 제한사항(6단계, 7단계에도 유지)**: `HandoffStationAssignment`는 `ShelfOutboundZone` 교대 시 To를 `OutboundStagingTransform`으로 보내는데, Outbound 배정의 첫 다리는 원래 슬롯에서 시작해야 해서 완전히 정합하지 않는다. 또한 `OnHandoffAtlasArrivedAtStagingPoint`는 교대로 밀려난 From을 대기실로 보내는 처리가 아직 연결돼 있지 않다(코드 내 TODO 주석 참고) — 7단계에서 대기실 자체는 실사용 가능해졌지만(`TryHeadToIdleZone` 등), 로테이션/핸드오프 경로 자체는 이번에도 스코프 밖이라 그대로 둠. 로테이션을 실제로 테스트하는 단계에서 재검토.
+> **삭제됨(사용자 지시, 재설계)**: 소프트 핸드오프(`FPendingHandoff`, `PendingHandoffs`, `OnHandoffAtlasArrivedAtStagingPoint`, 스테이징 지점 경유)는 제거했다. 대기실을 실제로 배치해 로테이션이 동작한 뒤, 대체 아틀라스가 스테이징 지점에 도착해도 도착 신호(`PendingHandoffAssignmentID`)가 어디서도 채워지지 않아 영구 정지하고 — From은 통보를 못 받아 계속 일해 선반에 로봇이 2대 남은 것처럼 보이는 결함이 확인됐다. 아래 "즉시 동시 교대" 방식으로 대체.
 
 ### `UOutboundDispatchSubsystem` (UWorldSubsystem)
 주문을 거점 배정과 트립 작업으로 분해하고, 유휴 아틀라스/운송로봇에게 배정한다. 교대 시 거점 배정 소유권 이전을 담당한다.
@@ -79,14 +68,12 @@
 - 멤버
   - `TArray<FStationAssignment> ActiveStationAssignments`
   - `TArray<FTransportTask> PendingTransportTasks`
-  - `TMap<FGuid, FPendingHandoff> PendingHandoffs`
 - 함수
   - `void DecomposeOrder(const FDeliveryOrder& Order)` (품목별로 Outbound 트레이를 먼저 찾아 확인한 뒤(버그 수정 — 원래 이 확인이 선반 배정 생성 이후에 있어 트레이를 못 찾으면 선반 배정만 덩그러니 남는 문제가 있었다) `ShelfOutboundZone` 배정 + `TrayWorkZone` 배정을 함께 생성. 수량만큼 `Shelf->TryReserveOldestOccupiedSlot`으로 슬롯을 미리 예약해 트립별 `FTransportTask`(Pickup=Shelf, Dropoff=Tray, FloorIndex/SlotIndex 포함)를 만들고, 그 `TaskID`를 `FReservedSlotEntry::TripTaskID`로 삼아 `Assignment.ReservedSlots`(SlotCoord 포함)와 `TrayAssignment.ReservedSlots`(SlotCoord 없이 TripTaskID만) 양쪽에 동시에 싣는다 — 배송로봇은 짐을 1개씩만 나르므로 트립 단위로 분리하고, 실제 재고가 요청 수량보다 적으면 예약된 만큼만 `RemainingCount`로 잡는다. 끝나면 `TryDispatchIdleAgents()` 호출)
   - `bool TryCancelAssignmentsForOrder(const FGuid& OrderID)` (8단계 — `SourceOrderID`가 일치하는 항목 중 하나라도 `AssignedAtlas`가 배정돼 있으면 전체 취소 거부. 전부 미배정이면 제거하고 성공 반환. `UDeliveryOrderSubsystem::TryCancelOrder`가 호출)
   - `bool TryAssignIdleAtlas(AFactoryAtlasRobot* Atlas, FStationAssignment& OutAssignment)` (버그 수정 — 같은 선반/트레이를 겨냥한 두 배정이 동시에 존재할 때, 이미 물리적으로 점유된 존을 겨냥한 배정은 `IsZoneOccupied`로 건너뛴다. 배정을 병합하지 않고 건너뛰기만 하는 이유는 `SourceOrderID` 기반 취소 추적을 주문 단위로 그대로 유지하기 위함. `AFactoryAtlasRobot::OnAssignmentExhausted`가 존을 반납할 때마다 `TryDispatchIdleAgents()`(자기 자신뿐 아니라 전체 유휴 로봇 스윕)를 호출해 건너뛰어졌던 배정이 다른 로봇에게 넘어가게 한다)
   - `bool TryAssignIdleTransportRobot(AFactoryTransportRobot* Robot, FTransportTask& OutTask)` (현재 픽업 대기 물품이 있는 거점 중 선택)
-  - `void HandoffStationAssignment(const FGuid& AssignmentID, AFactoryAtlasRobot* From, AFactoryAtlasRobot* To)` (**소프트 핸드오프.** 즉시 점유를 넘기지 않고 `PendingHandoffs`에 등록한 뒤 To를 `AStorageShelf`의 스테이징 트랜스폼(`InboundStagingTransform`/`OutboundStagingTransform`)으로 이동시킨다. 실제 점유 이전은 `OnHandoffAtlasArrivedAtStagingPoint`에서 처리하며, 그 전까지 From은 계속 거점을 점유한 채 작업을 이어간다)
-  - `void OnHandoffAtlasArrivedAtStagingPoint(const FGuid& AssignmentID)` (To의 `AFactoryAIController::OnMoveCompleted`가 스테이징 지점 도착을 알리면 호출. `AStorageShelf::TransferZoneOccupancy` 호출로 점유를 From→To로 원자적 이전 → `FStationAssignment::AssignedAtlas`를 To로 교체 → To의 `AcceptStationAssignment` 호출 → From을 대기실로 이동 → `PendingHandoffs`에서 제거)
+  - `void HandoffStationAssignment(const FGuid& AssignmentID, AFactoryAtlasRobot* From, AFactoryAtlasRobot* To)` (**버그 수정(사용자 지시) — 즉시 동시 교대.** 대기실에 쉬고 있는 대체 아틀라스가 있을 때만(`EvaluateRotationOrContinue`의 `FindRestedOccupant` 전제) 호출된다. 결정된 순간 바로 존 점유를 From→To로 원자적 이전(`AStorageShelf::TransferZoneOccupancy`, Tray는 `ReleaseWorkZone`+`TryReserveWorkZone`) → `FStationAssignment::AssignedAtlas`를 To로 교체 → `To->AcceptStationAssignment(*Assignment, &From의 PendingSlotReservation)`으로 From이 멈춘 바로 그 슬롯/트립부터 곧장 이어받게 함 → `From->HandOffCurrentAssignmentAndRest()`로 같은 순간 배정을 비우고 대기실로 보냄. 현장 안전(교대 공백 없이 즉시 인계)을 우선한 설계 — 고장 위험을 감수하며 대체 인력 도착까지 기다리지 않는다)
   - `void OnStationAssignmentCompleted(const FGuid& AssignmentID)` (RemainingCount==0, 아틀라스 재배치 가능 상태로 전환; `FTaskLifecycleEvent(Completed)` 발행)
   - `void OnTransportTaskCompleted(const FGuid& TaskID)` (`FTaskLifecycleEvent(Completed)` 발행)
   - `void TryDispatchIdleAgents()` (6단계 신규 — 월드의 Idle 상태 아틀라스/배송로봇 전체를 훑어 `TryAssignIdleAtlas`/`TryAssignIdleTransportRobot`을 시도하는 Push 경로. `DecomposeOrder`/`EnqueueInboundWork`가 새 작업 생성 직후 호출해, 이미 대기 중이던 유휴 로봇이 놓치지 않고 새 작업을 받게 한다. 7단계 후속 — 줄 작업이 없는 로봇은 `AFactoryAgentBase::TryHeadToIdleZone()`으로 자신의 고정 홈 슬롯으로 보낸다)

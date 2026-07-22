@@ -5,11 +5,7 @@
 #include "Agent/FactoryAgentBase.h"
 #include "AITypes.h"
 #include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
 #include "Navigation/CrowdFollowingComponent.h"
-#include "NavFilters/NavigationQueryFilter.h"
-#include "Navigation/CostZoneVolume.h"
-#include "Navigation/FactoryNavAreas.h"
 
 namespace
 {
@@ -18,31 +14,16 @@ namespace
 		const AAIController* PawnController = Pawn ? Cast<AAIController>(Pawn->GetController()) : nullptr;
 		return PawnController ? Cast<UCrowdFollowingComponent>(PawnController->GetPathFollowingComponent()) : nullptr;
 	}
-
-	// Filter->Areas에서 AreaClass 항목을 찾아 갱신하거나, 없으면 새로 추가한다.
-	void ApplyAreaCostOverride(UNavigationQueryFilter& Filter, TSubclassOf<UNavArea> AreaClass, float Cost)
-	{
-		for (FNavigationFilterArea& AreaOverride : Filter.Areas)
-		{
-			if (AreaOverride.AreaClass == AreaClass)
-			{
-				AreaOverride.bOverrideTravelCost = true;
-				AreaOverride.TravelCostOverride = Cost;
-				return;
-			}
-		}
-
-		FNavigationFilterArea NewOverride;
-		NewOverride.AreaClass = AreaClass;
-		NewOverride.bOverrideTravelCost = true;
-		NewOverride.TravelCostOverride = Cost;
-		Filter.Areas.Add(NewOverride);
-	}
 }
 
 void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
 {
 	Super::OnMoveCompleted(RequestID, Result);
+
+	// 버그 수정(사용자 리포트) — MoveTo()가 동기적으로 성공을 반환해도 실제로는 전혀 움직이지 않는 사례가
+	// 있어, 비동기 완료 콜백이 애초에 오기는 하는지부터 조건 없이 로그로 남긴다.
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] OnMoveCompleted 호출됨 — Code=%d"),
+		GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code.GetValue()));
 
 	if (Result.IsSuccess())
 	{
@@ -107,58 +88,19 @@ void AFactoryAIController::RequestMoveWithFilter(const FVector& Destination)
 	}
 	LastRequestedDestination = Destination;
 
-	if (QueryFilterClass)
-	{
-		ApplyDynamicCongestionCost(QueryFilterClass.GetDefaultObject());
-	}
-
 	FAIMoveRequest MoveRequest(Destination);
 	MoveRequest.SetNavigationFilter(QueryFilterClass);
-	MoveTo(MoveRequest);
-}
+	const FPathFollowingRequestResult Result = MoveTo(MoveRequest);
 
-void AFactoryAIController::ApplyDynamicCongestionCost(UNavigationQueryFilter* Filter)
-{
-	const APawn* MyPawn = GetPawn();
-	UWorld* World = GetWorld();
-	if (!Filter || !MyPawn || !World)
-	{
-		return;
-	}
-
-	// QueryFilterClass는 bInstantiateForQuerier=true이므로 CDO(Areas)를 수정해도
-	// 이동 요청 직후 동기적으로 InitializeFilter가 다시 읽어가 매 요청마다 새로 반영된다
-	// (다른 에이전트와 뒤섞이지 않음 — RequestMoveWithFilter 안에서 수정→MoveTo가 같은 스택에서 동기 처리됨).
-	const FVector MyLocation = MyPawn->GetActorLocation();
-	const float CurrentTime = World->GetTimeSeconds();
-
-	TArray<AActor*> FoundZones;
-	UGameplayStatics::GetAllActorsOfClass(World, ACostZoneVolume::StaticClass(), FoundZones);
-
-	for (AActor* ZoneActor : FoundZones)
-	{
-		ACostZoneVolume* Zone = Cast<ACostZoneVolume>(ZoneActor);
-		if (!Zone || !Zone->AffectedAreaClass)
-		{
-			continue;
-		}
-
-		if (FVector::DistSquared(Zone->GetActorLocation(), MyLocation) > FMath::Square(CongestionSenseRadius))
-		{
-			continue;
-		}
-
-		Zone->TickPendingReset(CurrentTime);
-
-		const float Multiplier = Zone->GetCurrentCostMultiplier();
-		if (Multiplier <= 1.f)
-		{
-			continue;
-		}
-
-		const UNavArea* AreaCDO = Zone->AffectedAreaClass.GetDefaultObject();
-		ApplyAreaCostOverride(*Filter, Zone->AffectedAreaClass, AreaCDO->DefaultCost * Multiplier);
-	}
+	// 버그 수정(사용자 리포트) — MoveTo()의 동기 결과를 지금까지 아무도 확인하지 않아서, 요청 자체가
+	// 즉시(동기적으로) 실패하면 OnMoveCompleted도 아예 호출되지 않아 재시도 로직조차 안 걸리고 조용히
+	// 아무 일도 일어나지 않았다. 정비 참여는 도착 판정 없이 배정 시점에 즉시 처리되므로, 이동이 이렇게
+	// 조용히 실패해도 상태머신(Idle→UnderRepair→Idle)은 정상처럼 계속 돌아가 눈치채기 어려웠다 — 성공/실패
+	// 무관하게 항상 결과를 남겨 "요청은 성공했는데 실제로는 안 움직이는" 케이스와 구분한다.
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] RequestMoveWithFilter — MoveTo 결과 Code=%d, PathFollowingStatus=%d, 목적지=%s"),
+		GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code),
+		GetPathFollowingComponent() ? static_cast<int32>(GetPathFollowingComponent()->GetStatus()) : -1,
+		*Destination.ToString());
 }
 
 void AFactoryAIController::SetAvoidanceIgnoreActor(AActor* TargetActor, bool bIgnore)

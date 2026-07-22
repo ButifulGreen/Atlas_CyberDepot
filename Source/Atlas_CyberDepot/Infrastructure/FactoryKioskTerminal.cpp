@@ -28,6 +28,13 @@ bool ApplyKioskOrderRequest(UWorld* World, const FKioskOrderRequest& Request)
 		}
 		return false;
 
+	case EOrderRequestType::InboundBatch:
+		if (UInventoryOrderSubsystem* Inventory = World->GetSubsystem<UInventoryOrderSubsystem>())
+		{
+			return Inventory->TryPlaceBatchOrder(Request.QuantityA, Request.QuantityB, Request.QuantityC);
+		}
+		return false;
+
 	case EOrderRequestType::OutboundApproval:
 		if (UDeliveryOrderSubsystem* Delivery = World->GetSubsystem<UDeliveryOrderSubsystem>())
 		{

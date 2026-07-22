@@ -54,21 +54,6 @@ public:
 	int32 SlotIndex = 0;
 };
 
-// 버그 수정 — 스테이징 지점이 순수 FTransform 프로퍼티(InboundStagingTransform/OutboundStagingTransform)였을 때
-// 뷰포트에 기즈모가 안 보이고 기본값이 월드 원점이라 배치를 깜빡하기 쉬웠다. 슬롯 마커와 동일한 패턴의
-// 씬 컴포넌트로 바꿔서 BP 컴포넌트 패널에 하나 추가하고 뷰포트에서 드래그로 배치하도록 변경.
-UCLASS(ClassGroup = (Infrastructure), meta = (BlueprintSpawnableComponent))
-class UInboundStagingMarkerComponent : public USceneComponent
-{
-	GENERATED_BODY()
-};
-
-UCLASS(ClassGroup = (Infrastructure), meta = (BlueprintSpawnableComponent))
-class UOutboundStagingMarkerComponent : public USceneComponent
-{
-	GENERATED_BODY()
-};
-
 // Docs/06_Infrastructure.md §6 — 4단계 대상. 기차형 좌/우 분리 구조, 3층×9칸 고정.
 // 좌/우 구역 예약 함수는 문서상 AFactoryAtlasRobot*이지만 그 클래스가 5단계에 있어
 // 지금은 멤버(InboundZoneOccupants 등)와 동일한 AFactoryAgentBase*로 받는다.
@@ -106,10 +91,6 @@ public:
 	// 이제 AFactoryAgentBase::TryRequestWaypointRoute(nullptr, 마커좌표)가 목표 마커에 가장 가깝고
 	// 실제로 도달 가능한 웨이포인트를 매번 동적으로 찾는다(Docs/08_Navigation.md §8-B).
 	bool IsZoneFull(EWorkZoneType ZoneType) const;
-
-	// 배송로봇↔아틀라스 핸드오프 지점. 마커를 못 찾으면 선반 자신의 위치로 대체.
-	FVector GetInboundStagingLocation() const;
-	FVector GetOutboundStagingLocation() const;
 
 	// 5단계 신규 — 마커 기준 선반 정면축 하나만 사용, 입고는 +방향/출고는 -방향으로 이 거리만큼 이동.
 	// 아틀라스/운송로봇마다 값이 다르다(운송로봇이 더 멀리). Docs에 없는 구현값 — 레벨 제작 후 실측 조정 필요.
@@ -164,10 +145,4 @@ private:
 	// BeginPlay에서 자식 컴포넌트 중 UStorageSlotMarkerComponent만 모아 캐싱
 	UPROPERTY()
 	TArray<TObjectPtr<UStorageSlotMarkerComponent>> SlotMarkers;
-
-	UPROPERTY()
-	TObjectPtr<UInboundStagingMarkerComponent> InboundStagingMarker;
-
-	UPROPERTY()
-	TObjectPtr<UOutboundStagingMarkerComponent> OutboundStagingMarker;
 };
