@@ -37,6 +37,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "VendorOrder")
 	void AcceptOrder(FGuid OrderID);
 
+	// 인바운드 주문 패널(BP)이 호출 — A/B/C 수량을 한 번에 제출한다(BP가 소유한 스테이징 변수를 그대로 전달).
+	// EOrderRequestType::InboundBatch로 RPC를 태우며, 쿨다운/자금 체크는 전부 서버측
+	// (UInventoryOrderSubsystem::TryPlaceBatchOrder)에서 합산 1회로 처리 — 여기서는 클라이언트 측 사전 검증을
+	// 하지 않는다. 호출 직후 BP가 스테이징 변수를 0으로 리셋하는 것까지가 한 세트(현재는 성공/실패 무관 낙관적 리셋).
+	UFUNCTION(BlueprintCallable, Category = "VendorOrder")
+	void SubmitInboundOrder(int32 QuantityA, int32 QuantityB, int32 QuantityC);
+
 protected:
 	virtual void NativeDestruct() override;
 

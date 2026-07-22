@@ -78,6 +78,82 @@ bool UInventoryOrderSubsystem::TryPlaceOrder(EItemType ItemType, int32 Quantity)
 	return true;
 }
 
+bool UInventoryOrderSubsystem::TryPlaceBatchOrder(int32 QuantityA, int32 QuantityB, int32 QuantityC)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	AMSmartFactoryManager* Manager = World->GetGameState<AMSmartFactoryManager>();
+	if (!Manager)
+	{
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Economy] 배치 주문 실패 — AMSmartFactoryManager(GameState)를 못 찾음"));
+		return false;
+	}
+
+	const FDateTime Now = FDateTime::UtcNow();
+	if ((Now - LastOrderTimestamp).GetTotalSeconds() < Manager->ReorderCooldownSeconds)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Economy] 배치 주문 실패 — 재주문 쿨다운 %.1f초 남음"), GetRemainingCooldownSeconds());
+		return false;
+	}
+
+	const int32 Quantities[3] = { QuantityA, QuantityB, QuantityC };
+	int32 TotalCost = 0;
+	bool bHasAnyQuantity = false;
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		if (Quantities[Index] <= 0)
+		{
+			continue;
+		}
+		const EItemType ItemType = static_cast<EItemType>(Index);
+		const FStockLineState* Line = StockLines.Find(ItemType);
+		if (!Line || Line->bIsLineLocked)
+		{
+			continue;
+		}
+		bHasAnyQuantity = true;
+		TotalCost += Manager->GetUnitPrice(ItemType) * Quantities[Index];
+	}
+
+	if (!bHasAnyQuantity)
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Economy] 배치 주문 실패 — 유효한 품목/수량이 없음(A:%d B:%d C:%d)"), QuantityA, QuantityB, QuantityC);
+		return false;
+	}
+
+	if (!Manager->TryAdjustFunds(-static_cast<float>(TotalCost), TEXT("InboundBatchOrder")))
+	{
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Economy] 배치 주문 실패 — 자금 부족(필요 %d)"), TotalCost);
+		return false;
+	}
+
+	LastOrderTimestamp = Now;
+
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		if (Quantities[Index] <= 0)
+		{
+			continue;
+		}
+		const EItemType ItemType = static_cast<EItemType>(Index);
+		const FStockLineState* Line = StockLines.Find(ItemType);
+		if (!Line || Line->bIsLineLocked)
+		{
+			continue;
+		}
+		PendingInboundQuantities.FindOrAdd(ItemType) += Quantities[Index];
+		TryDrainInboundBacklog(World, ItemType);
+	}
+
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Economy] 배치 주문 성공 — A:%d B:%d C:%d, 총 비용 -%d(잔액 %.0f)"),
+		QuantityA, QuantityB, QuantityC, TotalCost, Manager->SharedFunds);
+	return true;
+}
+
 bool UInventoryOrderSubsystem::DebugForcePlaceOrder(EItemType ItemType, int32 Quantity)
 {
 	const FStockLineState* Line = StockLines.Find(ItemType);

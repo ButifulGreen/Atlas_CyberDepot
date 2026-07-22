@@ -13,7 +13,12 @@ class UBoxComponent;
 UENUM(BlueprintType)
 enum class EOrderRequestType : uint8
 {
+	// 단일 품목(실물 키오스크/MQTT 경로 — Docs/11_MQTT.md::OnKioskOrderReceived)
 	Inbound,
+	// 금액 산정 시스템 신규 — 플레이어 주문 UI(UVendorOrderListWidget) 전용. A/B/C 수량을 한 번에 제출해
+	// 쿨다운/자금 체크를 1회만 수행한다(Inbound를 품목별로 3번 호출하면 첫 품목이 쿨다운을 즉시 소모해
+	// 나머지가 전부 실패하는 문제가 있었다 — Docs/03_InventoryOrder.md 참고).
+	InboundBatch,
 	OutboundApproval,
 	// 8단계 — 예약됐지만 아직 로봇이 배정되지 않은 주문 취소도 같은 RPC 경로를 태우기 위해 추가
 	Cancel
@@ -33,6 +38,16 @@ struct FKioskOrderRequest
 	// Inbound 전용
 	UPROPERTY(BlueprintReadOnly)
 	int32 Quantity = 0;
+
+	// InboundBatch 전용
+	UPROPERTY(BlueprintReadOnly)
+	int32 QuantityA = 0;
+
+	UPROPERTY(BlueprintReadOnly)
+	int32 QuantityB = 0;
+
+	UPROPERTY(BlueprintReadOnly)
+	int32 QuantityC = 0;
 
 	// OutboundApproval / Cancel 전용
 	UPROPERTY(BlueprintReadOnly)

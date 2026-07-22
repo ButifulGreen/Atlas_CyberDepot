@@ -48,8 +48,9 @@ public:
 	TObjectPtr<UDataTable> ItemPriceTable;
 
 	// 전역 단일 재주문 쿨다운("차량 연계" 이전까지의 임시 제약, Docs/14_OpenIssues.md 참고).
+	// 임시로 5초 — 나중에 이펙트/카운트다운 UI를 붙이기 전까지는 짧게 둬서 테스트 편의를 우선한다.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Balance|Economy")
-	float ReorderCooldownSeconds = 30.f;
+	float ReorderCooldownSeconds = 5.f;
 
 	// 외부업체 랜덤 주문. 배열 크기가 곧 업체 수(요구사항은 5, 나중에 조정 가능).
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Balance|Economy")
