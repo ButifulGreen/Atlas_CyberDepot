@@ -7,7 +7,7 @@
 #include "Benchmark/BenchmarkTypes.h"
 #include "BenchmarkHarnessSubsystem.generated.h"
 
-class AFactoryAgentBase;
+class IConsoleObject;
 
 enum class EBenchmarkPhase : uint8
 {
@@ -24,45 +24,38 @@ class UBenchmarkHarnessSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+	// 기본값(Game/Editor/PIE)은 Play를 누르지 않은 평범한 에디터 편집 월드까지 포함한다 — 스폰/콘솔 커맨드
+	// 등록은 실제 플레이 세션에서만 의미가 있으므로 Editor를 제외한다.
+	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
+
 	UPROPERTY(BlueprintReadOnly)
 	TArray<FPerfSample> RecordedSamples;
 
 	UPROPERTY(BlueprintReadOnly)
 	FPerfSample BaselineAverage;
 
-	// Docs에 스폰 대상/방식이 명시돼 있지 않아 노출 — 레벨/내비메시가 아직 없어(기획단계) 실기 테스트는 후속 단계.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Benchmark")
-	TSubclassOf<AFactoryAgentBase> AgentClassToSpawn;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Benchmark")
-	FVector SpawnOrigin = FVector::ZeroVector;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Benchmark")
-	float SpawnRadius = 500.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Benchmark")
-	float SampleIntervalSeconds = 1.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Benchmark")
-	float PhaseDurationSeconds = 30.f;
-
-	// 에이전트 수 증가율 대비 이 배수를 넘는 리소스 증가율을 비정상 병목으로 판정(Docs에 값이 없어 노출)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Benchmark")
-	float NonLinearBottleneckToleranceMultiplier = 1.5f;
-
-	void RunScalingComparison(int32 BaselineAgentCount, float ScaleMultiplier);
+	// 이미 진행 중(CurrentPhase != Idle)이면 아무 것도 하지 않고 false를 반환한다.
+	bool RunScalingComparison(int32 BaselineAgentCount, float ScaleMultiplier);
 	void RecordPerfSample();
 	FScalingReport ComputeScalingReport() const;
-	void ExportPerfReport(const FString& FilePath);
-	void StartForcedDeadlockDemo(const FStressTestParams& Params);
+	// 실제 파일 저장 성공 여부(FFileHelper::SaveStringToFile 결과)를 그대로 반환한다.
+	bool ExportPerfReport(const FString& FilePath);
 
 private:
 	void SpawnBenchmarkAgents(int32 Count);
 	void DespawnBenchmarkAgents();
 	void BeginPhase(EBenchmarkPhase Phase, int32 AgentCount);
 	void OnPhaseComplete();
-	void OnDeadlockDemoEnd();
 	FPerfSample AveragePerfSamples(const TArray<FPerfSample>& Samples) const;
+
+	// 콘솔 커맨드(Benchmark.*) 핸들러 — 파싱 후 위 공개 함수로 위임한다.
+	void HandleRunScalingComparisonCommand(const TArray<FString>& Args);
+	void HandlePrintScalingReportCommand();
+	void HandleExportPerfReportCommand(const TArray<FString>& Args);
+
+	TArray<IConsoleObject*> RegisteredConsoleCommands;
 
 	EBenchmarkPhase CurrentPhase = EBenchmarkPhase::Idle;
 	float PendingScaleMultiplier = 1.f;
@@ -79,5 +72,4 @@ private:
 
 	FTimerHandle SampleTimerHandle;
 	FTimerHandle PhaseTimerHandle;
-	FTimerHandle DeadlockDemoTimerHandle;
 };
