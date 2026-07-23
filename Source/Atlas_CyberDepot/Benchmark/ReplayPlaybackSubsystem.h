@@ -34,6 +34,12 @@ public:
 	void Play();
 	void Pause();
 	void SeekToTime(float TimeSeconds);
+	// 신규(사용자 지시, 재생 토글) — Pause와 달리 로드된 프레임까지 비워 재생 세션 자체를 완전히 닫는다.
+	void Stop();
+
+	bool IsPlaying() const { return bIsPlaying; }
+	double GetPlaybackElapsedSeconds() const { return PlaybackElapsedSeconds; }
+	double GetTotalDurationSeconds() const { return LoadedFrames.Num() > 0 ? ElapsedSecondsFromFrame(LoadedFrames.Num() - 1) : 0.0; }
 
 	// FTickableGameObject
 	virtual void Tick(float DeltaTime) override;

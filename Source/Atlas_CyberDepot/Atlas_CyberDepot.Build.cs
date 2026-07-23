@@ -15,8 +15,9 @@ public class Atlas_CyberDepot : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
 
 		// 9단계(Docs/09_Visualization.md) UMG 위젯, Docs/11_MQTT.md JSON 직렬화/Paho MQTT 연동,
-		// 10단계(Docs/10_Benchmark_Replay.md) 게임/GPU 스레드 타이밍 계측용
-		PrivateDependencyModuleNames.AddRange(new string[] { "AIModule", "NavigationSystem", "UMG", "Slate", "SlateCore", "Json", "JsonUtilities", "RHI", "RenderCore", "PahoMQTT" });
+		// 10단계(Docs/10_Benchmark_Replay.md) 게임/GPU 스레드 타이밍 계측용, DeveloperSettings는
+		// UReplaySettings(WorldSubsystem 값을 프로젝트 세팅 패널에서 편집 가능하게 하기 위함)용
+		PrivateDependencyModuleNames.AddRange(new string[] { "AIModule", "NavigationSystem", "UMG", "Slate", "SlateCore", "Json", "JsonUtilities", "RHI", "RenderCore", "PahoMQTT", "DeveloperSettings" });
 
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

@@ -17,7 +17,7 @@ void AFactoryPlayerController::OnPossess(APawn* InPawn)
 	}
 }
 
-void AFactoryPlayerController::Server_RequestPossessNPC_Implementation(AFactoryNPCHuman* TargetNPC)
+void AFactoryPlayerController::Server_RequestPossessNPC(AFactoryNPCHuman* TargetNPC)
 {
 	// 버그 수정(로깅 규율) — 이 RPC가 서버에 실제로 도착했는지조차 로그가 없어 확인할 수 없었다(클라이언트
 	// 쪽 IA_Interact/트레이스 문제와 서버 쪽 빙의 거부를 구분 불가).
@@ -37,7 +37,7 @@ void AFactoryPlayerController::Server_RequestPossessNPC_Implementation(AFactoryN
 	Possess(TargetNPC);
 }
 
-void AFactoryPlayerController::Server_ReleaseNPC_Implementation()
+void AFactoryPlayerController::Server_ReleaseNPC()
 {
 	AFactoryNPCHuman* PossessedNPC = Cast<AFactoryNPCHuman>(GetPawn());
 	APawn* TargetSpectatorPawn = OriginalSpectatorPawn.Get();
@@ -61,7 +61,7 @@ void AFactoryPlayerController::Server_ReleaseNPC_Implementation()
 	PossessedNPC->ReleasePossession();
 }
 
-void AFactoryPlayerController::Server_SubmitKioskOrder_Implementation(AFactoryKioskTerminal* SourceKiosk, FKioskOrderRequest Request)
+void AFactoryPlayerController::Server_SubmitKioskOrder(AFactoryKioskTerminal* SourceKiosk, FKioskOrderRequest Request)
 {
 	UWorld* World = GetWorld();
 	if (!SourceKiosk || !World)
@@ -77,7 +77,7 @@ void AFactoryPlayerController::Server_SubmitKioskOrder_Implementation(AFactoryKi
 	ApplyKioskOrderRequest(World, Request);
 }
 
-void AFactoryPlayerController::Server_JoinRepair_Implementation(UActorComponent* TargetRepairComponent)
+void AFactoryPlayerController::Server_JoinRepair(UActorComponent* TargetRepairComponent)
 {
 	URepairProgressComponent* RepairComponent = Cast<URepairProgressComponent>(TargetRepairComponent);
 	AFactoryNPCHuman* PossessedNPC = Cast<AFactoryNPCHuman>(GetPawn());
@@ -91,7 +91,7 @@ void AFactoryPlayerController::Server_JoinRepair_Implementation(UActorComponent*
 	PossessedNPC->JoinRepairAsPlayer(RepairComponent);
 }
 
-void AFactoryPlayerController::Server_LeaveRepair_Implementation(UActorComponent* TargetRepairComponent)
+void AFactoryPlayerController::Server_LeaveRepair(UActorComponent* TargetRepairComponent)
 {
 	// 버그 수정(8단계) — 인자로 받은 컴포넌트를 그대로 신뢰하지 않고, NPC 자신이 서버 권위로 들고 있는
 	// JoinedRepairComponent를 이탈시킨다(클라이언트가 지연된/잘못된 값을 보내도 안전).

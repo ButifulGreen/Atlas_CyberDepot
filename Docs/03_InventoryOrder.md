@@ -66,5 +66,6 @@
   - `void OnAgentBecameIdle(AFactoryAgentBase* Agent)` (대기 공간 도착 시 호출, `IsMaintenanceDue()` 체크)
   - `void OnRepairCompleted(AFactoryAgentBase* Agent)` (FullRepair 완료 후 각 `AIdleWaitingZone`의 `ShouldDispatchNPCForMaintenance()` 재평가 트리거; 조건 충족 시 즉시 배치 정비 발동)
   - `AFactoryNPCHuman* FindNearestAvailableNPC(const FVector& Location) const` (`UnderRepair` 상태이거나 **플레이어가 빙의 중인 NPC**(`Cast<APlayerController>(NPC->GetController())`)는 후보에서 제외한다 — 8단계 멀티플레이어 정교화 항목이었으나 8단계 구현 시 누락됐던 것을 2026-07-22 실기 버그 리포트로 확인 후 추가. 없으면 빙의 중인 NPC가 본인도 모르게 다른 로봇 정비 인원으로 배정될 수 있었다)
+  - `int32 AllocateNextAgentDisplayNumber(EActorType ActorType)`(사용자 지시, 신규 — `AFactoryAgentBase::DisplayName`용 타입별 일련번호 발급, `Docs/04_Agent_AI.md` 참고. 카운터(`TMap<EActorType, int32> AgentDisplayNameCounters`, private)를 정적/전역 변수 대신 여기 두는 이유는 `SharedFunds` 등과 동일 — 서버 권위 인스턴스가 확실히 하나뿐인 자리에 둬야 같은 프로세스에서 도는 여러 PIE 인스턴스끼리 카운터가 새지 않는다)
 
 > **선반 포화(돌발 이벤트) 처리**: 입고 물품의 전용 선반(`AStorageShelf`)이 가득 차면 해당 입고 트레이는 의도적으로 정지된 채 유지된다(데드락이 아니라 설계된 이상 상황). 해소 수단은 두 가지뿐이다 — ① 플레이어가 해당 품목 비중이 큰 외부 출고 주문을 수락해 재고를 비우거나, ② 향후 추가 예정인 폐기 처리(가칭 `ADiscardZone` + 전용 트레이, 세부 설계 미정)로 직접 비운다. 발생/해소 시점은 `Code:004` 이벤트로 기록되어 "재고 적체 패턴" 분석 데이터가 된다.

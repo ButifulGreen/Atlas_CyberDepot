@@ -44,6 +44,14 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	FGuid AgentID;
 
+	// 사용자 지시 — 아웃라이너에 보이는 이름(GetActorLabel)과 로그에 찍히는 이름(GetName, 런타임 스폰 시
+	// 자동 생성되는 내부 UObject 이름)이 서로 달라 특정 로봇을 찾기 어렵다는 문제 해결용. 서버가
+	// BeginPlay에서 AMSmartFactoryManager::AllocateNextAgentDisplayNumber로 타입별 일련번호를 받아 한 번만
+	// 채우고("Atlas-03" 형태), 이후 모든 로그는 GetName() 대신 이 값을 쓴다. OnRep_DisplayName에서
+	// SetActorLabel도 같이 호출해 아웃라이너 표시도 통일한다.
+	UPROPERTY(ReplicatedUsing = OnRep_DisplayName, BlueprintReadOnly)
+	FString DisplayName;
+
 	// Docs/01_EventBus_DataPipeline.md의 EActorType과 04_Agent_AI.md의 EAgentType이 동일한 값 구성이라 하나로 통합
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	EActorType AgentType = EActorType::AtlasRobot;
@@ -57,6 +65,13 @@ public:
 
 	UPROPERTY(BlueprintReadOnly)
 	float BlockedTimer = 0.f;
+
+	// Docs/10_Benchmark_Replay.md — 리플레이용 FStateSnapshot 발행 주기(이동 중일 때만 적용, 정지 상태는
+	// OnRep_CurrentState의 즉시 발행으로 충분해 주기 샘플링 대상에서 뺀다). 서버/클라이언트 각자 권한과
+	// 무관하게 자기가 보는 값을 독립적으로 발행한다(리슨 서버 멀티플레이에서 각 플레이어가 리플레이를
+	// 각자 로컬로 볼 수 있어야 한다는 설계).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Balance|Replay")
+	float ReplaySnapshotIntervalSeconds = 0.1f;
 
 	// 버그 수정(사용자 요청, 대비책) — 그래프 구간/FinalHop 안전 트레이스 둘 다 AFactoryAgentBase 파생
 	// 액터만 감지 대상이라, 선반 같은 정적 지오메트리에 막히면 Pause조차 안 걸리고 영구 정지할 수 있다
@@ -200,6 +215,11 @@ public:
 	virtual int32 GetOperationCount() const { return 0; }
 	virtual void ApplyRestDecay(int32 Amount) {}
 
+	// AI 학습 로그(FTrainingLogEntry, 사용자 지시 2026-07-23)용 — 아틀라스/배송로봇만 override한다.
+	// NPC는 물류 아이템을 소지하지 않고 정식 배정 ID도 없어 베이스 기본값(false/Invalid Guid) 그대로 둔다.
+	virtual bool TryGetCarriedItemType(EItemType& OutItemType) const { return false; }
+	virtual FGuid GetCurrentAssignmentID() const { return FGuid(); }
+
 	// URepairProgressComponent::OnRepairCompleted가 호출. 베이스 기본 구현은 배정/트립이 없는 에이전트용
 	// (Idle 전환뿐). AtlasRobot/TransportRobot는 override해 CurrentAssignment/CurrentTask가 남아있으면
 	// (자연 발생 고장은 항상 Working 도중 롤링되므로 보존돼 있음) Working으로 복귀시켜 기존 재시도 경로가
@@ -222,9 +242,13 @@ protected:
 	UFUNCTION()
 	virtual void OnRep_CurrentState();
 
+	UFUNCTION()
+	void OnRep_DisplayName();
+
 private:
 	// Docs에 없는 구현값 — 정비 임계치 테스트용 디버그 표시. GetRepairComponent()가 있는(=Atlas/TransportRobot)
-	// 에이전트만 캡슐 중심 80유닛 위에 1초마다 GetOperationCount()를 정수로 갱신 표시한다.
+	// 에이전트만 캡슐 중심 80유닛 위에 0.1초마다 GetOperationCount()+DisplayName을 갱신 표시한다(사용자
+	// 지시 — 기존 1초 주기는 로봇이 이동하면 표시가 허공에 남았다가 새 위치에 다시 그려지는 것처럼 보였다).
 	void DrawDebugOperationCountLabel();
 
 	FTimerHandle DebugOperationCountTimerHandle;
@@ -232,6 +256,22 @@ private:
 	// Tick의 BlockedRecoveryRetryIntervalSeconds 판정용 — 마지막으로 강제 재탐색을 시도했던 시점의
 	// BlockedTimer 값(BlockedTimer 자체는 계속 누적되므로, 이 값과의 차이로 다음 재시도 시점을 판단).
 	float LastBlockedRecoveryAttemptSeconds = 0.f;
+
+	// Tick의 ReplaySnapshotIntervalSeconds 판정용 누적 시간.
+	float ReplaySnapshotAccumulatedSeconds = 0.f;
+
+	// EventBus->PublishSnapshot(ToSnapshot())을 발행 — Tick(이동 중 주기)과 OnRep_CurrentState(상태 전환
+	// 즉시)가 공용으로 호출.
+	void PublishReplaySnapshot() const;
+
+	// Docs/10_Benchmark_Replay.md — AI 학습 로그(FTrainingLogEntry) 공용 발행 경로. Timestamp/ActorID/
+	// ActorType/CurrentState/Location까지만 채운 기본형은 BuildTrainingLogEntry가, 이동 관련 필드
+	// (MoveDestination/SelectedWaypointName)까지 채우는 건 EmitMovementTrainingLog가 담당한다.
+	FTrainingLogEntry BuildTrainingLogEntry() const;
+	void EmitTrainingLogEntry(const FTrainingLogEntry& Entry) const;
+	// AIController->RequestMoveWithFilter를 호출하는 모든 지점에서 그 직전에 호출 — Waypoint가 nullptr이면
+	// 마커 좌표(FinalHop)로 직행하는 이동이라는 뜻.
+	void EmitMovementTrainingLog(const FVector& Destination, const AFactoryNavWaypoint* Waypoint) const;
 
 	// 버그 수정(사용자 지시) — 그래프 중간 홉 예약이 경합으로 실패하면 예전엔 곧장 전체 재탐색을 했는데,
 	// 그러면 지금 막힌 노드 하나 때문에 경로 전체를 다시 짜면서 엉뚱하게 먼 후보로 빠질 위험이 있었다

@@ -10,6 +10,7 @@
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnAnomalyEvent, const FAnomalyEvent&);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnStateSnapshot, const FStateSnapshot&);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTaskLifecycleEvent, const FTaskLifecycleEvent&);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnTrainingLogEntry, const FTrainingLogEntry&);
 
 // Docs/01_EventBus_DataPipeline.md §1 — 다른 모든 시스템이 이 이벤트 버스를 구독한다.
 UCLASS()
@@ -21,15 +22,18 @@ public:
 	FOnAnomalyEvent OnAnomalyPublished;
 	FOnStateSnapshot OnSnapshotPublished;
 	FOnTaskLifecycleEvent OnTaskLifecyclePublished;
+	FOnTrainingLogEntry OnTrainingLogPublished;
 
 	void PublishAnomaly(const FAnomalyEvent& Event);
 	void PublishSnapshot(const FStateSnapshot& Snapshot);
 	void PublishTaskLifecycle(const FTaskLifecycleEvent& Event);
+	void PublishTrainingLogEntry(const FTrainingLogEntry& Entry);
 
 	FDelegateHandle SubscribeAnomaly(const FOnAnomalyEvent::FDelegate& Callback);
 	FDelegateHandle SubscribeSnapshot(const FOnStateSnapshot::FDelegate& Callback);
 	FDelegateHandle SubscribeTaskLifecycle(const FOnTaskLifecycleEvent::FDelegate& Callback);
+	FDelegateHandle SubscribeTrainingLogEntry(const FOnTrainingLogEntry::FDelegate& Callback);
 
-	// 세 델리게이트 중 Handle이 등록된 쪽에서만 제거되며, 나머지는 안전하게 무시된다.
+	// 네 델리게이트 중 Handle이 등록된 쪽에서만 제거되며, 나머지는 안전하게 무시된다.
 	void Unsubscribe(FDelegateHandle Handle);
 };
