@@ -56,7 +56,7 @@ void AFactoryNPCHuman::AssignMaintenance(AFactoryAgentBase* Target, ERepairType 
 	AssignedMaintenanceTarget = Target;
 	SetState(EAgentState::UnderRepair);
 
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] %s: %s를 향해 이동 시작(RepairType=%s)"), *GetName(), *Target->GetName(),
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] %s: %s를 향해 이동 시작(RepairType=%s)"), *DisplayName, *Target->DisplayName,
 		RepairType == ERepairType::FullRepair ? TEXT("FullRepair") : TEXT("QuickCheck"));
 
 	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
@@ -115,7 +115,7 @@ void AFactoryNPCHuman::OnArrivedAtDestination()
 	SetState(EAgentState::Idle);
 
 	const int32 WaitSeconds = FMath::RandRange(0, MaxOfficeWaitSeconds);
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Patrol] %s 사무실 도착 — %d초 대기 후 순찰 재개"), *GetName(), WaitSeconds);
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Patrol] %s 사무실 도착 — %d초 대기 후 순찰 재개"), *DisplayName, WaitSeconds);
 
 	if (WaitSeconds <= 0)
 	{
@@ -180,7 +180,7 @@ void AFactoryNPCHuman::PossessedBy(AController* NewController)
 	UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer ? LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr;
 	if (!Subsystem)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: EnhancedInputLocalPlayerSubsystem을 못 찾음"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: EnhancedInputLocalPlayerSubsystem을 못 찾음"), *DisplayName);
 	}
 	else
 	{
@@ -190,7 +190,7 @@ void AFactoryNPCHuman::PossessedBy(AController* NewController)
 		}
 		else
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: DefaultMappingContext가 비어있음 — BP_FactoryNPCHuman에서 IMC_Default 할당 필요"), *GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: DefaultMappingContext가 비어있음 — BP_FactoryNPCHuman에서 IMC_Default 할당 필요"), *DisplayName);
 		}
 
 		if (MouseLookMappingContext)
@@ -199,10 +199,10 @@ void AFactoryNPCHuman::PossessedBy(AController* NewController)
 		}
 		else
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MouseLookMappingContext가 비어있음 — BP_FactoryNPCHuman에서 IMC_MouseLook 할당 필요"), *GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MouseLookMappingContext가 비어있음 — BP_FactoryNPCHuman에서 IMC_MouseLook 할당 필요"), *DisplayName);
 		}
 
-		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 빙의 중 매핑 컨텍스트 추가 완료"), *GetName());
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 빙의 중 매핑 컨텍스트 추가 완료"), *DisplayName);
 	}
 
 	BoundInputPlayerController = PC;
@@ -257,7 +257,7 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!EnhancedInput)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: PlayerInputComponent가 UEnhancedInputComponent가 아님"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: PlayerInputComponent가 UEnhancedInputComponent가 아님"), *DisplayName);
 		return;
 	}
 
@@ -267,7 +267,7 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 	else
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MoveAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MoveAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *DisplayName);
 	}
 
 	if (LookAction)
@@ -276,7 +276,7 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 	else
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: LookAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: LookAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *DisplayName);
 	}
 
 	if (MouseLookAction)
@@ -285,7 +285,7 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 	else
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MouseLookAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: MouseLookAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *DisplayName);
 	}
 
 	if (JumpAction)
@@ -295,7 +295,7 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 	else
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: JumpAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: JumpAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *DisplayName);
 	}
 
 	if (InteractAction)
@@ -304,7 +304,7 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 	else
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: InteractAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: InteractAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *DisplayName);
 	}
 
 	if (ClickAction)
@@ -313,10 +313,10 @@ void AFactoryNPCHuman::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 	else
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: ClickAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: ClickAction이 비어있어 바인딩하지 못함 — BP_FactoryNPCHuman에서 할당 필요"), *DisplayName);
 	}
 
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 빙의 입력 바인딩 완료"), *GetName());
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 빙의 입력 바인딩 완료"), *DisplayName);
 }
 
 void AFactoryNPCHuman::OnMoveTriggered(const FInputActionValue& Value)
@@ -330,7 +330,7 @@ void AFactoryNPCHuman::OnMoveTriggered(const FInputActionValue& Value)
 	const FVector2D MoveInput = Value.Get<FVector2D>();
 	if (!Controller)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: OnMoveTriggered — Controller가 없음"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: OnMoveTriggered — Controller가 없음"), *DisplayName);
 		return;
 	}
 
@@ -407,7 +407,7 @@ AFactoryAgentBase* AFactoryNPCHuman::FindRepairableInFrontOfCamera() const
 
 	if (!BestAgent)
 	{
-		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 감지 범위 내 Broken 정비 대상 없음(%d개 겹침)"), *GetName(), Overlaps.Num());
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 감지 범위 내 Broken 정비 대상 없음(%d개 겹침)"), *DisplayName, Overlaps.Num());
 	}
 
 	return BestAgent;
@@ -443,13 +443,13 @@ void AFactoryNPCHuman::OnInteractTriggered(const FInputActionValue& Value)
 {
 	// 사용자 지시 — F는 빙의 해제 전용(정비/키오스크는 좌클릭, OnClickTriggered 참고). F/정비/키오스크가
 	// 전부 같은 키를 썼을 때 "다시 눌러도 빙의가 안 풀리는" 문제가 있었다 — 셋을 분리해 해소.
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Interact 트리거됨(빙의 해제 요청)"), *GetName());
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Interact 트리거됨(빙의 해제 요청)"), *DisplayName);
 
 	AFactoryPlayerController* PC = Cast<AFactoryPlayerController>(GetController());
 	if (!PC)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AFactoryPlayerController 캐스트 실패(GetController()=%s)"),
-			*GetName(), GetController() ? *GetController()->GetClass()->GetName() : TEXT("None"));
+			*DisplayName, GetController() ? *GetController()->GetClass()->GetName() : TEXT("None"));
 		return;
 	}
 
@@ -458,13 +458,13 @@ void AFactoryNPCHuman::OnInteractTriggered(const FInputActionValue& Value)
 
 void AFactoryNPCHuman::OnClickTriggered(const FInputActionValue& Value)
 {
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Click 트리거됨(빙의 중)"), *GetName());
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: IA_Click 트리거됨(빙의 중)"), *DisplayName);
 
 	AFactoryPlayerController* PC = Cast<AFactoryPlayerController>(GetController());
 	if (!PC)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AFactoryPlayerController 캐스트 실패(GetController()=%s)"),
-			*GetName(), GetController() ? *GetController()->GetClass()->GetName() : TEXT("None"));
+			*DisplayName, GetController() ? *GetController()->GetClass()->GetName() : TEXT("None"));
 		return;
 	}
 
@@ -472,14 +472,14 @@ void AFactoryNPCHuman::OnClickTriggered(const FInputActionValue& Value)
 	// 상호작용을 시작할 상황 자체가 아니다(사용자 지시).
 	if (ActiveKioskWidget)
 	{
-		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크 위젯 닫기(토글)"), *GetName());
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크 위젯 닫기(토글)"), *DisplayName);
 		CloseKioskWidget();
 		return;
 	}
 
 	if (JoinedRepairComponent)
 	{
-		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 이미 참여 중인 정비 이탈 요청"), *GetName());
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 이미 참여 중인 정비 이탈 요청"), *DisplayName);
 		PC->Server_LeaveRepair(JoinedRepairComponent);
 		return;
 	}
@@ -490,11 +490,11 @@ void AFactoryNPCHuman::OnClickTriggered(const FInputActionValue& Value)
 		{
 			// 사용자 지시 — 감지+참여 시작 순간만큼은 다른 에이전트 로그에 묻히지 않도록 Warning 등급 +
 			// 화면 플래시 메시지로 별도 표시(위의 지속 상태 표시와는 다른 키라 겹쳐 쌓인다).
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] ▶▶▶ %s: %s 정비 참여 시작 ◀◀◀"), *GetName(), *Target->GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] ▶▶▶ %s: %s 정비 참여 시작 ◀◀◀"), *DisplayName, *Target->DisplayName);
 			if (GEngine)
 			{
 				GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.f, FColor::Green,
-					FString::Printf(TEXT("정비 대상 감지 — %s 참여 시작!"), *Target->GetName()));
+					FString::Printf(TEXT("정비 대상 감지 — %s 참여 시작!"), *Target->DisplayName));
 			}
 			PC->Server_JoinRepair(TargetRepair);
 			return;
@@ -513,14 +513,14 @@ void AFactoryNPCHuman::OpenKioskWidget(AFactoryKioskTerminal* Kiosk)
 	if (!PC || !KioskWidgetClass)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: 키오스크 위젯을 열 수 없음(PC=%s, KioskWidgetClass=%s)"),
-			*GetName(), PC ? TEXT("있음") : TEXT("없음"), KioskWidgetClass ? TEXT("있음") : TEXT("비어있음 — BP_FactoryNPCHuman에서 KioskWidgetClass 할당 필요"));
+			*DisplayName, PC ? TEXT("있음") : TEXT("없음"), KioskWidgetClass ? TEXT("있음") : TEXT("비어있음 — BP_FactoryNPCHuman에서 KioskWidgetClass 할당 필요"));
 		return;
 	}
 
 	ActiveKioskWidget = CreateWidget<UVendorOrderListWidget>(PC, KioskWidgetClass);
 	if (!ActiveKioskWidget)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: CreateWidget(KioskWidgetClass) 실패"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: CreateWidget(KioskWidgetClass) 실패"), *DisplayName);
 		return;
 	}
 
@@ -530,7 +530,7 @@ void AFactoryNPCHuman::OpenKioskWidget(AFactoryKioskTerminal* Kiosk)
 	}
 	else
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AMSmartFactoryManager(GameState)를 못 찾음 — 위젯이 주문 목록을 못 받음"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Interact] %s: AMSmartFactoryManager(GameState)를 못 찾음 — 위젯이 주문 목록을 못 받음"), *DisplayName);
 	}
 	ActiveKioskWidget->BindToKiosk(Kiosk);
 	ActiveKioskWidget->AddToViewport();
@@ -541,7 +541,7 @@ void AFactoryNPCHuman::OpenKioskWidget(AFactoryKioskTerminal* Kiosk)
 	PC->SetIgnoreMoveInput(true);
 	PC->SetIgnoreLookInput(true);
 
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크(%s) 위젯 열림"), *GetName(), *Kiosk->GetName());
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크(%s) 위젯 열림"), *DisplayName, *Kiosk->GetName());
 }
 
 void AFactoryNPCHuman::CloseKioskWidget()
@@ -562,7 +562,7 @@ void AFactoryNPCHuman::CloseKioskWidget()
 		PC->SetIgnoreLookInput(false);
 	}
 
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크 위젯 닫힘"), *GetName());
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Interact] %s: 키오스크 위젯 닫힘"), *DisplayName);
 }
 
 void AFactoryNPCHuman::JoinRepairAsPlayer(URepairProgressComponent* RepairComponent)
@@ -621,11 +621,11 @@ void AFactoryNPCHuman::DrawRepairStatusDebugMessage()
 		const bool bIsFullRepair = Repair->CurrentRepairType == ERepairType::FullRepair;
 		const float TargetDuration = bIsFullRepair ? Repair->FullRepairDurationSeconds : Repair->QuickCheckDurationSeconds;
 		const float Percent = TargetDuration > 0.f ? FMath::Clamp(Repair->RepairProgress / TargetDuration * 100.f, 0.f, 100.f) : 0.f;
-		const AActor* TargetOwner = Repair->GetOwner();
+		const AFactoryAgentBase* TargetOwner = Cast<AFactoryAgentBase>(Repair->GetOwner());
 
 		GEngine->AddOnScreenDebugMessage(Key, 0.6f, FColor::Green,
 			FString::Printf(TEXT("[정비 참여 중] 대상: %s / %s / 진행률 %.0f%% (%d명 참여)"),
-				TargetOwner ? *TargetOwner->GetName() : TEXT("?"),
+				TargetOwner ? *TargetOwner->DisplayName : TEXT("?"),
 				bIsFullRepair ? TEXT("FullRepair") : TEXT("QuickCheck"),
 				Percent, Repair->GetValidRepairerCount()));
 	}

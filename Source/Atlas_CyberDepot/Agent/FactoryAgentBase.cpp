@@ -10,10 +10,30 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Assignment/OutboundDispatchSubsystem.h"
+#include "Assignment/SmartFactoryManager.h"
+#include "Repair/RepairProgressComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Components/CapsuleComponent.h"
+
+namespace
+{
+	FString GetAgentTypeShortName(EActorType ActorType)
+	{
+		switch (ActorType)
+		{
+		case EActorType::AtlasRobot:
+			return TEXT("Atlas");
+		case EActorType::TransportRobot:
+			return TEXT("Transport");
+		case EActorType::NPCHuman:
+			return TEXT("NPC");
+		default:
+			return TEXT("Agent");
+		}
+	}
+}
 
 AFactoryAgentBase::AFactoryAgentBase()
 {
@@ -24,6 +44,28 @@ AFactoryAgentBase::AFactoryAgentBase()
 void AFactoryAgentBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 버그 수정(사용자 리포트, 실기 테스트) — 권한 게이트(아래 이른 return) 이전에 둬야 클라이언트에서도
+	// 실행된다. 각자 자기가 보는 값을 독립적으로 리플레이 스냅샷으로 발행한다. 원래 CurrentState==Moving
+	// 기준이었는데, 이건 AI 디스패치(TryRequestWaypointRoute 등)가 명시적으로 SetState(Moving)을 부를
+	// 때만 참이 된다 — 플레이어가 NPC를 빙의해서 Enhanced Input으로 직접 걸어다니는 경우(이 게임의 핵심
+	// 조작 방식)는 AddMovementInput만 호출할 뿐 SetState를 전혀 거치지 않아 CurrentState가 계속 Idle에
+	// 머물러 있고, 그 동안은 스냅샷이 단 하나도 발행되지 않았다(3분간 플레이해도 파일이 빈 채로 남은
+	// 원인). "AI가 이동을 의도했는지"가 아니라 "실제로 움직이고 있는지"를 봐야 하므로 속도 기준으로
+	// 바꾼다 — AI 디스패치든 플레이어 조작이든 동일하게 잡힌다.
+	if (GetVelocity().SizeSquared() > KINDA_SMALL_NUMBER)
+	{
+		ReplaySnapshotAccumulatedSeconds += DeltaTime;
+		if (ReplaySnapshotAccumulatedSeconds >= ReplaySnapshotIntervalSeconds)
+		{
+			ReplaySnapshotAccumulatedSeconds = 0.f;
+			PublishReplaySnapshot();
+		}
+	}
+	else
+	{
+		ReplaySnapshotAccumulatedSeconds = 0.f;
+	}
 
 	if (HasAuthority() && CurrentState == EAgentState::Working)
 	{
@@ -67,7 +109,7 @@ void AFactoryAgentBase::Tick(float DeltaTime)
 		{
 			LastBlockedRecoveryAttemptSeconds = BlockedTimer;
 			UE_LOG(LogFactoryDispatch, Warning, TEXT("[Nav] %s %.1f초 이상 정지 감지(정적 장애물 등 트레이스로 못 잡는 경우 대비) — 강제 재탐색"),
-				*GetName(), BlockedTimer);
+				*DisplayName, BlockedTimer);
 			AbandonWaypointRouteAndReroute();
 		}
 	}
@@ -82,10 +124,28 @@ void AFactoryAgentBase::BeginPlay()
 		AgentID = FGuid::NewGuid();
 	}
 
+	// 사용자 지시 — 로그/아웃라이너 이름 통일. 서버가 타입별 일련번호를 한 번만 매기고, OnRep_DisplayName이
+	// (서버 자신은 명시 호출, 클라이언트는 리플리케이션으로 자동 호출) 아웃라이너 라벨까지 맞춘다.
+	if (HasAuthority() && DisplayName.IsEmpty())
+	{
+		if (AMSmartFactoryManager* Manager = GetWorld()->GetGameState<AMSmartFactoryManager>())
+		{
+			const int32 Number = Manager->AllocateNextAgentDisplayNumber(AgentType);
+			DisplayName = FString::Printf(TEXT("%s-%02d"), *GetAgentTypeShortName(AgentType), Number);
+		}
+		else
+		{
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] DisplayName 할당 실패 — AMSmartFactoryManager(GameState)를 못 찾음"), *GetName());
+		}
+		OnRep_DisplayName();
+	}
+
 	// Docs에 없는 구현값 — 정비 임계치 테스트용. GetRepairComponent()가 있는(=Atlas/TransportRobot) 에이전트만 표시.
+	// 버그 수정(사용자 지시) — 기존 1초 주기는 로봇이 이동하면 표시가 허공에 남았다가 새 위치에 다시
+	// 그려지는 것처럼 보였다. 0.1초로 줄여 눈에 띄게 끊기지 않도록 한다.
 	if (GetRepairComponent())
 	{
-		GetWorldTimerManager().SetTimer(DebugOperationCountTimerHandle, this, &AFactoryAgentBase::DrawDebugOperationCountLabel, 1.f, true);
+		GetWorldTimerManager().SetTimer(DebugOperationCountTimerHandle, this, &AFactoryAgentBase::DrawDebugOperationCountLabel, 0.1f, true);
 	}
 
 	// Docs/08_Navigation.md — 안전거리 감지도 GetRepairComponent()가 있는(=Atlas/TransportRobot)
@@ -99,16 +159,23 @@ void AFactoryAgentBase::BeginPlay()
 
 void AFactoryAgentBase::DrawDebugOperationCountLabel()
 {
-	if (!GetCapsuleComponent())
+	// 버그 수정(사용자 리포트) — DrawDebugString은 SetActorHiddenInGame과 무관하게 계속 그려진다(월드 좌표에
+	// 직접 찍는 별개의 호출이라 컴포넌트 가시성을 안 따름). 리플레이 재생 중 실제 로봇을 숨겨도 이 이름표만
+	// 허공에 남아있던 원인 — 숨겨진 동안은 아예 그리지 않는다.
+	if (IsHidden() || !GetCapsuleComponent())
 	{
 		return;
 	}
 
 	// 버그 수정(사용자 지시) — 실기 테스트 중 임계치 수치만으로는 지금 고장난 로봇이 어느 것인지 한눈에
 	// 구분이 안 됐다. Broken 상태면 빨간색으로 표시해 바로 식별 가능하게 한다.
+	// 사용자 지시 — DisplayName도 같이 표시해 아웃라이너/로그를 안 열어도 화면만 보고 어느 로봇인지 바로
+	// 식별 가능하게 한다. Duration(0.15초)은 갱신 주기(0.1초)보다 살짝 길게 잡아 다음 갱신 전에 사라지는
+	// 깜빡임 없이 자연스럽게 이어지도록 한다.
 	const FVector Location = GetCapsuleComponent()->GetComponentLocation() + FVector(0.f, 0.f, 80.f);
 	const FColor LabelColor = (CurrentState == EAgentState::Broken) ? FColor::Red : FColor::Yellow;
-	DrawDebugString(GetWorld(), Location, FString::FromInt(GetOperationCount()), nullptr, LabelColor, 1.1f, false, 1.3f);
+	const FString Label = FString::Printf(TEXT("%s (%d)"), *DisplayName, GetOperationCount());
+	DrawDebugString(GetWorld(), Location, Label, nullptr, LabelColor, 0.15f, false, 1.3f);
 }
 
 void AFactoryAgentBase::SetState(EAgentState NewState)
@@ -122,7 +189,7 @@ void AFactoryAgentBase::SetState(EAgentState NewState)
 	// 확인하려면 매번 다른 로직의 로그를 조합해 추측해야 했다. 모든 에이전트(아틀라스/배송로봇/NPC)에
 	// 공용이라 여기 한 곳에서 남기면 어디서든 "[에이전트명] 상태 전환"으로 검색해 타임라인을 바로 본다.
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] 상태 전환 %s → %s"),
-		*GetName(), *UEnum::GetValueAsString(CurrentState), *UEnum::GetValueAsString(NewState));
+		*DisplayName, *UEnum::GetValueAsString(CurrentState), *UEnum::GetValueAsString(NewState));
 
 	CurrentState = NewState;
 
@@ -216,7 +283,7 @@ bool AFactoryAgentBase::TryRequestWaypointRoute(AFactoryNavWaypoint* TargetWaypo
 	AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController());
 	if (!NavSubsystem || !AIController)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Nav] %s TryRequestWaypointRoute 실패 — NavSubsystem 또는 AIController 없음"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Nav] %s TryRequestWaypointRoute 실패 — NavSubsystem 또는 AIController 없음"), *DisplayName);
 		return false;
 	}
 
@@ -233,7 +300,7 @@ bool AFactoryAgentBase::TryRequestWaypointRoute(AFactoryNavWaypoint* TargetWaypo
 	if (!bRouteFound || Route.Num() == 0)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Nav] %s TryRequestWaypointRoute 실패 — 현재 위치(%s)에서 %s까지 경로 없음(모든 후보 웨이포인트 탐색 실패) — %.1f초 후 재시도"),
-			*GetName(), *GetActorLocation().ToString(), TargetWaypoint ? *TargetWaypoint->GetName() : *FinalHopTarget.ToString(), WaypointRetryIntervalSeconds);
+			*DisplayName, *GetActorLocation().ToString(), TargetWaypoint ? *TargetWaypoint->GetName() : *FinalHopTarget.ToString(), WaypointRetryIntervalSeconds);
 		bHasPendingWaypointRetry = true;
 		PendingRetryTargetWaypoint = TargetWaypoint;
 		PendingRetryFinalHopTarget = FinalHopTarget;
@@ -254,10 +321,11 @@ bool AFactoryAgentBase::TryRequestWaypointRoute(AFactoryNavWaypoint* TargetWaypo
 	if (PendingWaypointRoute.Num() == 1)
 	{
 		// 이미 목표 웨이포인트 위 — 그래프 이동 없이 바로 최종 홉만 수행.
-		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 이미 목표 웨이포인트(%s) 위 — 최종 홉만 수행"), *GetName(), *ResolvedTarget->GetName());
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 이미 목표 웨이포인트(%s) 위 — 최종 홉만 수행"), *DisplayName, *ResolvedTarget->GetName());
 		TravelPhase = EWaypointTravelPhase::FinalHop;
 		WaypointRouteIndex = 0;
 		SetState(EAgentState::Moving);
+		EmitMovementTrainingLog(PendingFinalHopTarget, ResolvedTarget);
 		AIController->RequestMoveWithFilter(PendingFinalHopTarget);
 		return true;
 	}
@@ -267,7 +335,7 @@ bool AFactoryAgentBase::TryRequestWaypointRoute(AFactoryNavWaypoint* TargetWaypo
 	if (!FirstHop || !FirstHop->TryReserve(this))
 	{
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s TryRequestWaypointRoute 실패 — 첫 홉(%s) 예약 실패(경합) — %.1f초 후 재시도"),
-			*GetName(), FirstHop ? *FirstHop->GetName() : TEXT("Invalid"), WaypointRetryIntervalSeconds);
+			*DisplayName, FirstHop ? *FirstHop->GetName() : TEXT("Invalid"), WaypointRetryIntervalSeconds);
 		PendingWaypointRoute.Reset();
 		WaypointRouteIndex = 0;
 		bHasPendingWaypointRetry = true;
@@ -278,9 +346,10 @@ bool AFactoryAgentBase::TryRequestWaypointRoute(AFactoryNavWaypoint* TargetWaypo
 	}
 
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 경로 확정(%d개 노드) — %s → ... → %s, 첫 홉 %s로 이동 시작"),
-		*GetName(), PendingWaypointRoute.Num(), *StartWaypoint->GetName(), *ResolvedTarget->GetName(), *FirstHop->GetName());
+		*DisplayName, PendingWaypointRoute.Num(), *StartWaypoint->GetName(), *ResolvedTarget->GetName(), *FirstHop->GetName());
 	TravelPhase = EWaypointTravelPhase::TraversingGraph;
 	SetState(EAgentState::Moving);
+	EmitMovementTrainingLog(FirstHop->GetActorLocation(), FirstHop);
 	AIController->RequestMoveWithFilter(FirstHop->GetActorLocation());
 	return true;
 }
@@ -339,7 +408,7 @@ bool AFactoryAgentBase::TryHandleWaypointRouteArrival()
 	{
 		bAwaitingWaitboundClearance = true;
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s Waitbound(%s) 대기 — 통과 조건 미충족, %.1f초 후 재확인"),
-			*GetName(), *ArrivedNode->GetName(), WaitboundRecheckIntervalSeconds);
+			*DisplayName, *ArrivedNode->GetName(), WaitboundRecheckIntervalSeconds);
 		GetWorldTimerManager().SetTimer(WaitboundRecheckTimerHandle, this, &AFactoryAgentBase::RecheckWaitboundClearance, WaitboundRecheckIntervalSeconds, false);
 		return true;
 	}
@@ -354,10 +423,11 @@ bool AFactoryAgentBase::TryHandleWaypointRouteArrival()
 	if (bReachedLastWaypoint)
 	{
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 그래프 마지막 노드 도착 — 최종 좌표(%s)로 짧은 직진 이동"),
-			*GetName(), *PendingFinalHopTarget.ToString());
+			*DisplayName, *PendingFinalHopTarget.ToString());
 		TravelPhase = EWaypointTravelPhase::FinalHop;
 		if (AIController)
 		{
+			EmitMovementTrainingLog(PendingFinalHopTarget, nullptr);
 			AIController->RequestMoveWithFilter(PendingFinalHopTarget);
 		}
 		return true;
@@ -368,7 +438,7 @@ bool AFactoryAgentBase::TryHandleWaypointRouteArrival()
 	if (!NextNode)
 	{
 		// 노드 자체가 유효하지 않으면(레벨 변경 등) 기다려도 소용없다 — 전체 재탐색만이 답이다.
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Nav] %s 다음 홉 노드가 유효하지 않음 — 현재 위치 기준 재탐색"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Nav] %s 다음 홉 노드가 유효하지 않음 — 현재 위치 기준 재탐색"), *DisplayName);
 		AbandonWaypointRouteAndReroute();
 		return true;
 	}
@@ -382,15 +452,16 @@ bool AFactoryAgentBase::TryHandleWaypointRouteArrival()
 		// 타임아웃 없이 무기한 대기(Tick의 BlockedTimer 안전망은 아래 플래그로 이 대기를 건드리지 않음).
 		bIsWaitingForNextHopReservation = true;
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 다음 홉(%s) 예약 실패(경합) — 같은 목표로 %.1f초 후 재시도"),
-			*GetName(), *NextNode->GetName(), WaypointRetryIntervalSeconds);
+			*DisplayName, *NextNode->GetName(), WaypointRetryIntervalSeconds);
 		GetWorldTimerManager().SetTimer(NextHopRetryTimerHandle, this, &AFactoryAgentBase::RetryNextHopReservation, WaypointRetryIntervalSeconds, false);
 		return true;
 	}
 
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 다음 홉(%d/%d) %s로 이동"),
-		*GetName(), WaypointRouteIndex, PendingWaypointRoute.Num() - 1, *NextNode->GetName());
+		*DisplayName, WaypointRouteIndex, PendingWaypointRoute.Num() - 1, *NextNode->GetName());
 	if (AIController)
 	{
+		EmitMovementTrainingLog(NextNode->GetActorLocation(), NextNode);
 		AIController->RequestMoveWithFilter(NextNode->GetActorLocation());
 	}
 	return true;
@@ -420,9 +491,10 @@ void AFactoryAgentBase::RetryNextHopReservation()
 
 	bIsWaitingForNextHopReservation = false;
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 다음 홉(%d/%d) %s로 이동(대기 후 재시도 성공)"),
-		*GetName(), WaypointRouteIndex, PendingWaypointRoute.Num() - 1, *NextNode->GetName());
+		*DisplayName, WaypointRouteIndex, PendingWaypointRoute.Num() - 1, *NextNode->GetName());
 	if (AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController()))
 	{
+		EmitMovementTrainingLog(NextNode->GetActorLocation(), NextNode);
 		AIController->RequestMoveWithFilter(NextNode->GetActorLocation());
 	}
 }
@@ -455,10 +527,11 @@ void AFactoryAgentBase::RecheckWaitboundClearance()
 
 	AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController());
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s Waitbound 통과 허가 — 최종 좌표(%s)로 짧은 직진 이동"),
-		*GetName(), *PendingFinalHopTarget.ToString());
+		*DisplayName, *PendingFinalHopTarget.ToString());
 	TravelPhase = EWaypointTravelPhase::FinalHop;
 	if (AIController)
 	{
+		EmitMovementTrainingLog(PendingFinalHopTarget, nullptr);
 		AIController->RequestMoveWithFilter(PendingFinalHopTarget);
 	}
 }
@@ -476,7 +549,7 @@ void AFactoryAgentBase::AbandonWaypointRouteAndReroute()
 	// 처리 대상에 포함한다.
 	const bool bWasFinalHop = (TravelPhase == EWaypointTravelPhase::FinalHop);
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[Nav] %s 경로 포기(%s) — 재탐색"),
-		*GetName(), bWasFinalHop ? TEXT("FinalHop") : TEXT("그래프 구간"));
+		*DisplayName, bWasFinalHop ? TEXT("FinalHop") : TEXT("그래프 구간"));
 
 	AFactoryNavWaypoint* FinalTargetWaypoint = (!bWasFinalHop && PendingWaypointRoute.Num() > 0) ? PendingWaypointRoute.Last().Get() : nullptr;
 	const FVector FinalHopTarget = PendingFinalHopTarget;
@@ -548,6 +621,7 @@ FStateSnapshot AFactoryAgentBase::ToSnapshot() const
 	Snapshot.Location = GetActorLocation();
 	Snapshot.Rotation = GetActorRotation();
 	Snapshot.Velocity = GetVelocity();
+	Snapshot.DisplayName = DisplayName;
 	return Snapshot;
 }
 
@@ -557,11 +631,78 @@ void AFactoryAgentBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 
 	DOREPLIFETIME(AFactoryAgentBase, AgentID);
 	DOREPLIFETIME(AFactoryAgentBase, CurrentState);
+	DOREPLIFETIME(AFactoryAgentBase, DisplayName);
+}
+
+void AFactoryAgentBase::OnRep_DisplayName()
+{
+#if WITH_EDITOR
+	// 아웃라이너 표시 이름을 로그와 동일하게 맞춘다(에디터 전용 API — 패키징 빌드엔 영향 없음).
+	if (!DisplayName.IsEmpty())
+	{
+		SetActorLabel(DisplayName);
+	}
+#endif
 }
 
 void AFactoryAgentBase::OnRep_CurrentState()
 {
-	// 하위 클래스에서 상태 전환 시각/애니메이션 반응을 위해 오버라이드
+	// 하위 클래스에서 상태 전환 시각/애니메이션 반응을 위해 오버라이드 가능 — 오버라이드 시 반드시
+	// Super::OnRep_CurrentState()를 호출해야 아래 리플레이 스냅샷/학습 로그 발행이 유지된다(SetState가
+	// 서버에서 명시 호출, 클라이언트에서는 리플리케이션이 값이 실제로 바뀔 때만 자동 호출 — 상태 변화
+	// 시점에만 발행되는 이벤트 기반 지점으로 쓰기에 정확히 들어맞는다).
+	PublishReplaySnapshot();
+	EmitTrainingLogEntry(BuildTrainingLogEntry());
+}
+
+void AFactoryAgentBase::PublishReplaySnapshot() const
+{
+	UGameInstance* GI = GetGameInstance();
+	UFactoryEventBusSubsystem* EventBus = GI ? GI->GetSubsystem<UFactoryEventBusSubsystem>() : nullptr;
+	if (!EventBus)
+	{
+		return;
+	}
+
+	EventBus->PublishSnapshot(ToSnapshot());
+}
+
+FTrainingLogEntry AFactoryAgentBase::BuildTrainingLogEntry() const
+{
+	FTrainingLogEntry Entry;
+	Entry.Timestamp = FDateTime::UtcNow();
+	Entry.ActorID = AgentID;
+	Entry.ActorType = AgentType;
+	Entry.CurrentState = CurrentState;
+	Entry.Location = GetActorLocation();
+
+	Entry.bIsCarryingItem = TryGetCarriedItemType(Entry.CarriedItemType);
+	Entry.RepairProgress = GetRepairComponent() ? GetRepairComponent()->RepairProgress : 0.f;
+	Entry.CurrentAssignmentID = GetCurrentAssignmentID();
+	Entry.OperationCount = GetOperationCount();
+	Entry.bIsPlayerControlled = IsPlayerControlled();
+
+	return Entry;
+}
+
+void AFactoryAgentBase::EmitTrainingLogEntry(const FTrainingLogEntry& Entry) const
+{
+	UGameInstance* GI = GetGameInstance();
+	UFactoryEventBusSubsystem* EventBus = GI ? GI->GetSubsystem<UFactoryEventBusSubsystem>() : nullptr;
+	if (!EventBus)
+	{
+		return;
+	}
+
+	EventBus->PublishTrainingLogEntry(Entry);
+}
+
+void AFactoryAgentBase::EmitMovementTrainingLog(const FVector& Destination, const AFactoryNavWaypoint* Waypoint) const
+{
+	FTrainingLogEntry Entry = BuildTrainingLogEntry();
+	Entry.MoveDestination = Destination;
+	Entry.SelectedWaypointName = Waypoint ? Waypoint->GetFName() : NAME_None;
+	EmitTrainingLogEntry(Entry);
 }
 
 void AFactoryAgentBase::RunSafetyTraceCheck()
@@ -674,7 +815,7 @@ void AFactoryAgentBase::RunGraphSegmentTraceCheck(AFactoryAIController* AIContro
 		// 고장은 곧 안 풀린다 — 기다리지 않고 즉시 재탐색(Abandon 내부에서 새 이동 요청이
 		// 지금 진행 중이던 이동을 대체하므로 별도 Resume이 필요 없다).
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Safety] %s가 %.0f 거리에서 고장난 %s 감지 — 즉시 재탐색"),
-			*GetName(), DetectedDistance, *DetectedAgent->GetName());
+			*DisplayName, DetectedDistance, *DetectedAgent->DisplayName);
 		PauseAccumulatedSeconds = 0.f;
 		AbandonWaypointRouteAndReroute();
 		return;
@@ -688,7 +829,7 @@ void AFactoryAgentBase::RunGraphSegmentTraceCheck(AFactoryAIController* AIContro
 	if (bDifferentTypeMoving)
 	{
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Safety] %s가 이종 타입 %s(Moving) 감지 — 즉시 재탐색"),
-			*GetName(), *DetectedAgent->GetName());
+			*DisplayName, *DetectedAgent->DisplayName);
 		PauseAccumulatedSeconds = 0.f;
 		AbandonWaypointRouteAndReroute();
 		return;
@@ -715,7 +856,7 @@ void AFactoryAgentBase::EnterOrMaintainPause(AFactoryAIController* AIController,
 	if (CurrentState != EAgentState::Pause)
 	{
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Safety] %s가 %.0f 거리에서 %s(상태=%s) 감지 — Pause 전환"),
-			*GetName(), Distance, *DetectedAgent->GetName(), *UEnum::GetValueAsString(DetectedAgent->CurrentState));
+			*DisplayName, Distance, *DetectedAgent->DisplayName, *UEnum::GetValueAsString(DetectedAgent->CurrentState));
 		SetState(EAgentState::Pause);
 		PauseAccumulatedSeconds = 0.f;
 		if (UPathFollowingComponent* PathFollowing = AIController->GetPathFollowingComponent())
@@ -731,7 +872,7 @@ void AFactoryAgentBase::EnterOrMaintainPause(AFactoryAIController* AIController,
 	PauseAccumulatedSeconds += SafetyTraceIntervalSeconds;
 	if (PauseAccumulatedSeconds >= PauseRerouteTimeoutSeconds)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Safety] %s Pause %.1f초 지속 — 재탐색 시도"), *GetName(), PauseAccumulatedSeconds);
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[Safety] %s Pause %.1f초 지속 — 재탐색 시도"), *DisplayName, PauseAccumulatedSeconds);
 		PauseAccumulatedSeconds = 0.f;
 		AbandonWaypointRouteAndReroute();
 	}
@@ -741,7 +882,7 @@ void AFactoryAgentBase::ResumeFromPause(AFactoryAIController* AIController, cons
 {
 	if (CurrentState == EAgentState::Pause)
 	{
-		UE_LOG(LogFactoryDispatch, Log, TEXT("[Safety] %s Pause 해제(%s) — 이동 재개"), *GetName(), Reason);
+		UE_LOG(LogFactoryDispatch, Log, TEXT("[Safety] %s Pause 해제(%s) — 이동 재개"), *DisplayName, Reason);
 		SetState(EAgentState::Moving);
 	}
 	PauseAccumulatedSeconds = 0.f;
@@ -828,7 +969,7 @@ void AFactoryAgentBase::RunFinalHopAreaTraceCheck(AFactoryAIController* AIContro
 	if (CurrentState != EAgentState::Pause)
 	{
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[Safety] %s FinalHop 정면에서 %s(상태=%s) 감지 — Pause 전환"),
-			*GetName(), *DetectedAgent->GetName(), *UEnum::GetValueAsString(DetectedAgent->CurrentState));
+			*DisplayName, *DetectedAgent->DisplayName, *UEnum::GetValueAsString(DetectedAgent->CurrentState));
 		SetState(EAgentState::Pause);
 		if (UPathFollowingComponent* PathFollowing = AIController->GetPathFollowingComponent())
 		{

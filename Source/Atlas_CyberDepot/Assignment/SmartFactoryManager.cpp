@@ -30,6 +30,13 @@ void AMSmartFactoryManager::BeginPlay()
 	}
 }
 
+int32 AMSmartFactoryManager::AllocateNextAgentDisplayNumber(EActorType ActorType)
+{
+	int32& Counter = AgentDisplayNameCounters.FindOrAdd(ActorType);
+	++Counter;
+	return Counter;
+}
+
 void AMSmartFactoryManager::AdjustReputation(float Delta, FName Reason)
 {
 	ReputationScore += Delta;

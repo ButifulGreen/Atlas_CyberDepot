@@ -84,6 +84,11 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly)
 	TArray<uint8> ItemTypeToMeshSlot;
 
+	// 사용자 지시 — 로그/아웃라이너 이름 통일(AFactoryAgentBase::DisplayName)용 타입별 일련번호 발급.
+	// 정적/전역 카운터 대신 여기 두는 이유는 SharedFunds와 동일(위 주석 참고) — 서버 권위 인스턴스가
+	// 확실히 하나뿐인 자리에 둬야 같은 프로세스에서 도는 여러 PIE 인스턴스끼리 카운터가 새지 않는다.
+	int32 AllocateNextAgentDisplayNumber(EActorType ActorType);
+
 	void AdjustReputation(float Delta, FName Reason);
 	void RequestMaintenance(AFactoryAgentBase* Agent, ERepairType RepairType);
 	void OnAgentBecameIdle(AFactoryAgentBase* Agent);
@@ -114,4 +119,8 @@ private:
 
 	UPROPERTY()
 	TArray<TWeakObjectPtr<AFactoryAgentBase>> PendingMaintenanceQueue;
+
+	// AllocateNextAgentDisplayNumber 전용 부기 값(서버 전용, 리플리케이트 불필요 — 매겨진 결과값인
+	// AFactoryAgentBase::DisplayName만 리플리케이트되면 충분하다).
+	TMap<EActorType, int32> AgentDisplayNameCounters;
 };

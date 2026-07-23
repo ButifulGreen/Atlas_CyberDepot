@@ -37,6 +37,17 @@ void AFactoryAtlasRobot::ApplyRestDecay(int32 Amount)
 	OperationCount = FMath::Max(0, OperationCount - Amount);
 }
 
+bool AFactoryAtlasRobot::TryGetCarriedItemType(EItemType& OutItemType) const
+{
+	if (!HeldItem)
+	{
+		return false;
+	}
+
+	OutItemType = HeldItem->ItemType;
+	return true;
+}
+
 void AFactoryAtlasRobot::ResumeAfterRepair()
 {
 	// 버그 수정 — 고장 직전 진행 중이던 배정이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로
@@ -99,7 +110,7 @@ void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assig
 		AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController());
 		if (!AIController)
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] AcceptStationAssignment(핸드오프) 실패 — AFactoryAIController가 없음"), *GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] AcceptStationAssignment(핸드오프) 실패 — AFactoryAIController가 없음"), *DisplayName);
 			return;
 		}
 
@@ -117,7 +128,7 @@ void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assig
 		}
 		else
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] AcceptStationAssignment(핸드오프) 실패 — TargetZoneOwner가 Tray도 Shelf도 아님"), *GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] AcceptStationAssignment(핸드오프) 실패 — TargetZoneOwner가 Tray도 Shelf도 아님"), *DisplayName);
 			return;
 		}
 
@@ -147,7 +158,7 @@ void AFactoryAtlasRobot::AcceptStationAssignment(const FStationAssignment& Assig
 void AFactoryAtlasRobot::TriggerBreakdown()
 {
 	SetState(EAgentState::Broken);
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] %s 고장 발생(Broken) — FullRepair 정비 요청"), *GetName());
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] %s 고장 발생(Broken) — FullRepair 정비 요청"), *DisplayName);
 
 	if (UGameInstance* GI = GetGameInstance())
 	{
@@ -256,7 +267,7 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 	{
 		if (!PendingSlotReservation.bIsValid)
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Shelf->) 실패 — PendingSlotReservation이 유효하지 않음"), *GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Shelf->) 실패 — PendingSlotReservation이 유효하지 않음"), *DisplayName);
 			return false;
 		}
 
@@ -270,7 +281,7 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 		if (!Item)
 		{
 			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Shelf->) 실패 — %s의 (Floor=%d, Slot=%d)에 아이템이 없음"),
-				*GetName(), *SourceShelf->GetName(), FloorIndex, SlotIndex);
+				*DisplayName, *SourceShelf->GetName(), FloorIndex, SlotIndex);
 			SourceShelf->ConfirmOutboundRemoved(FloorIndex, SlotIndex);
 			PendingSlotReservation = FPendingSlotReservation();
 			return false;
@@ -294,7 +305,7 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 		if (!HeldItem || !PendingSlotReservation.bIsValid)
 		{
 			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(->Shelf) 실패 — HeldItem=%s, PendingSlotReservation.bIsValid=%s"),
-				*GetName(), HeldItem ? TEXT("있음") : TEXT("없음"), PendingSlotReservation.bIsValid ? TEXT("true") : TEXT("false"));
+				*DisplayName, HeldItem ? TEXT("있음") : TEXT("없음"), PendingSlotReservation.bIsValid ? TEXT("true") : TEXT("false"));
 			return false;
 		}
 
@@ -335,19 +346,19 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 				if (UInventoryOrderSubsystem* InventoryOrders = GetWorld()->GetSubsystem<UInventoryOrderSubsystem>())
 				{
 					UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] Inbound 트레이(%s) 비움 — %s 대기열 확인 트리거"),
-						*GetName(), *SourceTray->GetName(), *UEnum::GetValueAsString(SourceTray->BoundItemType));
+						*DisplayName, *SourceTray->GetName(), *UEnum::GetValueAsString(SourceTray->BoundItemType));
 					InventoryOrders->OnInboundTrayCleared(SourceTray->BoundItemType);
 				}
 				else
 				{
 					UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] Inbound 트레이(%s) 비움 — UInventoryOrderSubsystem을 못 찾아 대기열 확인 스킵"),
-						*GetName(), *SourceTray->GetName());
+						*DisplayName, *SourceTray->GetName());
 				}
 			}
 
 			return true;
 		}
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Tray->) 실패 — %s에 CurrentItem이 없음"), *GetName(), *SourceTray->GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Tray->) 실패 — %s에 CurrentItem이 없음"), *DisplayName, *SourceTray->GetName());
 		return false;
 	}
 
@@ -355,7 +366,7 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 	{
 		if (!HeldItem)
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(->Tray) 실패 — HeldItem이 없음"), *GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(->Tray) 실패 — HeldItem이 없음"), *DisplayName);
 			return false;
 		}
 
@@ -374,7 +385,7 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 			SourceRobot->OnItemCollectedByAtlas();
 			return true;
 		}
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Robot->) 실패 — %s의 PayloadItem이 없음"), *GetName(), *SourceRobot->GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(Robot->) 실패 — %s의 PayloadItem이 없음"), *DisplayName, *SourceRobot->DisplayName);
 		return false;
 	}
 
@@ -382,7 +393,7 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 	{
 		if (!HeldItem)
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(->Robot) 실패 — HeldItem이 없음"), *GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem(->Robot) 실패 — HeldItem이 없음"), *DisplayName);
 			return false;
 		}
 
@@ -393,7 +404,7 @@ bool AFactoryAtlasRobot::TransferItem(AActor* Source, AActor* Destination)
 		return true;
 	}
 
-	UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem 실패 — Source/Destination이 어떤 타입과도 매치되지 않음"), *GetName());
+	UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TransferItem 실패 — Source/Destination이 어떤 타입과도 매치되지 않음"), *DisplayName);
 	return false;
 }
 
@@ -452,7 +463,7 @@ void AFactoryAtlasRobot::OnMoveFailedPermanently()
 	// (정지 에이전트+선반 사이 회피 국소최소)은 별도로 다룬다 — 같은 지점이 계속 막히면 다음 아틀라스도
 	// 반복 실패할 수 있다는 트레이드오프는 감수.
 	UE_LOG(LogFactoryDispatch, Error, TEXT("[%s] 목적지 도달 불가로 배정(%s, 대상=%s)을 포기 — 레벨 NavMesh/지오메트리 또는 혼잡 점검 필요. 재큐잉함"),
-		*GetName(), *CurrentAssignment.AssignmentID.ToString(),
+		*DisplayName, *CurrentAssignment.AssignmentID.ToString(),
 		CurrentAssignment.TargetZoneOwner.IsValid() ? *CurrentAssignment.TargetZoneOwner->GetName() : TEXT("Invalid"));
 
 	if (AStorageShelf* Shelf = Cast<AStorageShelf>(CurrentAssignment.TargetZoneOwner.Get()))
@@ -543,7 +554,7 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 	AFactoryAIController* AIController = Cast<AFactoryAIController>(GetController());
 	if (!AIController)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — AFactoryAIController가 없음. CurrentAssignment가 시작되지 못하고 방치됨"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — AFactoryAIController가 없음. CurrentAssignment가 시작되지 못하고 방치됨"), *DisplayName);
 		return;
 	}
 
@@ -563,7 +574,7 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 			// (CurrentState가 Idle에 머물러 배차 스윕에서도 이미 배정된 것으로 보여 재시도가 없었음).
 			// 점유 중인 아틀라스가 끝날 때까지 같은 간격으로 재시도한다.
 			UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] StartCurrentAssignment 대기 — %s의 WorkZone이 다른 아틀라스 점유 중, %.1f초 후 재시도"),
-				*GetName(), *Tray->GetName(), ZoneRetryIntervalSeconds);
+				*DisplayName, *Tray->GetName(), ZoneRetryIntervalSeconds);
 			GetWorldTimerManager().SetTimer(StartAssignmentRetryTimerHandle, this, &AFactoryAtlasRobot::StartCurrentAssignment, ZoneRetryIntervalSeconds, false);
 			return;
 		}
@@ -572,7 +583,7 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 		// 거리 대신 정확한 짝을 찾을 수 있다(Tray는 슬롯 개념이 없어 SlotCoord는 (-1,-1)로 무시됨).
 		if (!PopNextReservedSlot())
 		{
-			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — %s에 ReservedSlots(TripTaskID)가 비어있음"), *GetName(), *Tray->GetName());
+			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — %s에 ReservedSlots(TripTaskID)가 비어있음"), *DisplayName, *Tray->GetName());
 			Tray->ReleaseWorkZone();
 			return;
 		}
@@ -589,7 +600,7 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 	AStorageShelf* Shelf = Cast<AStorageShelf>(CurrentAssignment.TargetZoneOwner.Get());
 	if (!Shelf)
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — TargetZoneOwner가 Tray도 Shelf도 아님"), *GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — TargetZoneOwner가 Tray도 Shelf도 아님"), *DisplayName);
 		return;
 	}
 
@@ -599,7 +610,7 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 	{
 		// 버그 수정 — Tray 분기와 동일한 이유로 재시도 추가(방치되면 CurrentAssignment가 영구 미아가 됨).
 		UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] StartCurrentAssignment 대기 — %s의 %s이 만석, %.1f초 후 재시도"),
-			*GetName(), *Shelf->GetName(), bEmit ? TEXT("OutboundZone") : TEXT("InboundZone"), ZoneRetryIntervalSeconds);
+			*DisplayName, *Shelf->GetName(), bEmit ? TEXT("OutboundZone") : TEXT("InboundZone"), ZoneRetryIntervalSeconds);
 		GetWorldTimerManager().SetTimer(StartAssignmentRetryTimerHandle, this, &AFactoryAtlasRobot::StartCurrentAssignment, ZoneRetryIntervalSeconds, false);
 		return;
 	}
@@ -608,7 +619,7 @@ void AFactoryAtlasRobot::StartCurrentAssignment()
 	// 별도의 스테이징 지점을 거치지 않으므로 Inbound/Outbound 모두 동일하게 슬롯 위치로 바로 이동한다.
 	if (!PopNextReservedSlot())
 	{
-		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — %s에 ReservedSlots가 비어있음(생성 시점 예약 로직 확인 필요)"), *GetName(), *Shelf->GetName());
+		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] StartCurrentAssignment 실패 — %s에 ReservedSlots가 비어있음(생성 시점 예약 로직 확인 필요)"), *DisplayName, *Shelf->GetName());
 		if (bEmit)
 		{
 			Shelf->ReleaseOutboundZone(this);
@@ -656,14 +667,14 @@ AFactoryTransportRobot* AFactoryAtlasRobot::FindWaitingTransportRobot(const FGui
 		if (Robot->CurrentState != EAgentState::Working)
 		{
 			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] FindWaitingTransportRobot 대기 — 트립(%s) 담당 %s가 아직 도착하지 않음(CurrentState=%d)"),
-				*GetName(), *TripTaskID.ToString(), *Robot->GetName(), static_cast<int32>(Robot->CurrentState));
+				*DisplayName, *TripTaskID.ToString(), *Robot->DisplayName, static_cast<int32>(Robot->CurrentState));
 			return nullptr;
 		}
 
 		if ((Robot->PayloadItem != nullptr) != bNeedsPayload)
 		{
 			UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] FindWaitingTransportRobot 대기 — 트립(%s) 담당 %s의 짐 보유 상태가 기대(%s)와 다름"),
-				*GetName(), *TripTaskID.ToString(), *Robot->GetName(), bNeedsPayload ? TEXT("true") : TEXT("false"));
+				*DisplayName, *TripTaskID.ToString(), *Robot->DisplayName, bNeedsPayload ? TEXT("true") : TEXT("false"));
 			return nullptr;
 		}
 
@@ -672,7 +683,7 @@ AFactoryTransportRobot* AFactoryAtlasRobot::FindWaitingTransportRobot(const FGui
 
 	// 이 트립을 맡을 배송로봇이 아직 배정되지 않음(PendingTransportTasks 대기 중) — 유휴 로봇이 생기면 자연히 해소된다.
 	UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] FindWaitingTransportRobot 대기 — 트립(%s)을 맡은 배송로봇이 아직 배정되지 않음"),
-		*GetName(), *TripTaskID.ToString());
+		*DisplayName, *TripTaskID.ToString());
 	return nullptr;
 }
 
@@ -729,12 +740,12 @@ bool AFactoryAtlasRobot::TryHandleFinalHopBrokenBlock(AFactoryAgentBase* BrokenA
 	if (!bFoundAlternative)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 선반(%s) 정비 중인 NPC(%s)가 접근을 막았지만 대체 칸이 없음 — 수리 종료까지 대기"),
-			*GetName(), *Shelf->GetName(), *BrokenAgent->GetName());
+			*DisplayName, *Shelf->GetName(), *BrokenAgent->DisplayName);
 		return false;
 	}
 
 	UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 선반(%s) 정비 중인 NPC(%s)가 (Floor=%d,Slot=%d) 접근을 막아 (Floor=%d,Slot=%d)로 재할당"),
-		*GetName(), *Shelf->GetName(), *BrokenAgent->GetName(), PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, NewFloorIndex, NewSlotIndex);
+		*DisplayName, *Shelf->GetName(), *BrokenAgent->DisplayName, PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, NewFloorIndex, NewSlotIndex);
 
 	Shelf->ReleaseSlotReservation(PendingSlotReservation.FloorIndex, PendingSlotReservation.SlotIndex, bWasInbound);
 
@@ -816,7 +827,7 @@ void AFactoryAtlasRobot::ContinueShelfAssignment()
 	if (!AIController || !Shelf || !PendingSlotReservation.bIsValid)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] ContinueShelfAssignment 중단 — AIController=%s, Shelf=%s, PendingSlotReservation.bIsValid=%s"),
-			*GetName(), AIController ? TEXT("있음") : TEXT("없음"), Shelf ? TEXT("있음") : TEXT("없음"), PendingSlotReservation.bIsValid ? TEXT("true") : TEXT("false"));
+			*DisplayName, AIController ? TEXT("있음") : TEXT("없음"), Shelf ? TEXT("있음") : TEXT("없음"), PendingSlotReservation.bIsValid ? TEXT("true") : TEXT("false"));
 		return;
 	}
 
@@ -895,7 +906,7 @@ void AFactoryAtlasRobot::ContinueTrayAssignment()
 	if (!Tray || !PendingSlotReservation.bIsValid)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] ContinueTrayAssignment 중단 — Tray=%s, PendingSlotReservation.bIsValid=%s"),
-			*GetName(), Tray ? TEXT("있음") : TEXT("없음"), PendingSlotReservation.bIsValid ? TEXT("true") : TEXT("false"));
+			*DisplayName, Tray ? TEXT("있음") : TEXT("없음"), PendingSlotReservation.bIsValid ? TEXT("true") : TEXT("false"));
 		return;
 	}
 

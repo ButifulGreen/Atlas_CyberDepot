@@ -14,6 +14,14 @@ namespace
 		const AAIController* PawnController = Pawn ? Cast<AAIController>(Pawn->GetController()) : nullptr;
 		return PawnController ? Cast<UCrowdFollowingComponent>(PawnController->GetPathFollowingComponent()) : nullptr;
 	}
+
+	// 사용자 지시 — 로그/아웃라이너 이름 통일. 이 컨트롤러는 항상 AFactoryAgentBase 계열만 조종하므로
+	// DisplayName을 그대로 쓴다.
+	FString GetPawnDisplayName(const APawn* Pawn)
+	{
+		const AFactoryAgentBase* Agent = Cast<AFactoryAgentBase>(Pawn);
+		return Agent ? Agent->DisplayName : TEXT("Unknown");
+	}
 }
 
 void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
@@ -23,7 +31,7 @@ void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFo
 	// 버그 수정(사용자 리포트) — MoveTo()가 동기적으로 성공을 반환해도 실제로는 전혀 움직이지 않는 사례가
 	// 있어, 비동기 완료 콜백이 애초에 오기는 하는지부터 조건 없이 로그로 남긴다.
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] OnMoveCompleted 호출됨 — Code=%d"),
-		GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code.GetValue()));
+		*GetPawnDisplayName(GetPawn()), static_cast<int32>(Result.Code.GetValue()));
 
 	if (Result.IsSuccess())
 	{
@@ -47,7 +55,7 @@ void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFo
 	if (MoveFailureRetryCount >= MaxMoveRetryAttempts)
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 이동 실패(Code=%d) — 재시도 %d회 모두 실패"),
-			GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code.GetValue()), MaxMoveRetryAttempts);
+			*GetPawnDisplayName(GetPawn()), static_cast<int32>(Result.Code.GetValue()), MaxMoveRetryAttempts);
 
 		// 버그 수정 — 재큐잉된 배정을 같은 에이전트가 바로 다시 집어 같은 목적지로 재시도할 때, 여기서
 		// 카운트를 리셋하지 않으면 RequestMoveWithFilter가 "이전과 같은 목적지"로 보고 카운트를 그대로
@@ -68,7 +76,7 @@ void AFactoryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFo
 
 	++MoveFailureRetryCount;
 	UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] 이동 실패(Code=%d) — %.1f초 후 재시도(%d/%d)"),
-		GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code.GetValue()),
+		*GetPawnDisplayName(GetPawn()), static_cast<int32>(Result.Code.GetValue()),
 		MoveRetryDelaySeconds, MoveFailureRetryCount, MaxMoveRetryAttempts);
 	GetWorldTimerManager().SetTimer(MoveRetryTimerHandle, this, &AFactoryAIController::RetryLastMove, MoveRetryDelaySeconds, false);
 }
@@ -98,7 +106,7 @@ void AFactoryAIController::RequestMoveWithFilter(const FVector& Destination)
 	// 조용히 실패해도 상태머신(Idle→UnderRepair→Idle)은 정상처럼 계속 돌아가 눈치채기 어려웠다 — 성공/실패
 	// 무관하게 항상 결과를 남겨 "요청은 성공했는데 실제로는 안 움직이는" 케이스와 구분한다.
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] RequestMoveWithFilter — MoveTo 결과 Code=%d, PathFollowingStatus=%d, 목적지=%s"),
-		GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), static_cast<int32>(Result.Code),
+		*GetPawnDisplayName(GetPawn()), static_cast<int32>(Result.Code),
 		GetPathFollowingComponent() ? static_cast<int32>(GetPathFollowingComponent()->GetStatus()) : -1,
 		*Destination.ToString());
 }

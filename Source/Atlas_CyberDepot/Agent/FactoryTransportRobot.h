@@ -69,6 +69,8 @@ public:
 	virtual float GetOperationRatio() const override;
 	virtual int32 GetOperationCount() const override { return OperationCount; }
 	virtual void ApplyRestDecay(int32 Amount) override;
+	virtual bool TryGetCarriedItemType(EItemType& OutItemType) const override;
+	virtual FGuid GetCurrentAssignmentID() const override { return CurrentTask.TaskID; }
 	virtual void ResumeAfterRepair() override;
 	virtual URepairProgressComponent* GetRepairComponent() const override { return RepairComponent; }
 	virtual void DebugForceBreakdown() override { TriggerBreakdown(); }

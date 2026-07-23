@@ -63,6 +63,17 @@ void AFactoryTransportRobot::ApplyRestDecay(int32 Amount)
 	OperationCount = FMath::Max(0, OperationCount - Amount);
 }
 
+bool AFactoryTransportRobot::TryGetCarriedItemType(EItemType& OutItemType) const
+{
+	if (!PayloadItem)
+	{
+		return false;
+	}
+
+	OutItemType = PayloadItem->ItemType;
+	return true;
+}
+
 void AFactoryTransportRobot::ResumeAfterRepair()
 {
 	// 버그 수정 — 고장 직전 진행 중이던 트립이 남아있으면(자연 발생 고장은 항상 Working 도중 롤링되므로
@@ -225,7 +236,7 @@ void AFactoryTransportRobot::OnMoveFailedPermanently()
 	if (PayloadItem)
 	{
 		UE_LOG(LogFactoryDispatch, Error, TEXT("[%s] 목적지 도달 불가로 트립(%s)을 포기 — 짐을 실은 채 실패해 재큐잉하지 않음(중복 생성 방지). 물품/레벨 NavMesh 수동 점검 필요"),
-			*GetName(), *CurrentTask.TaskID.ToString());
+			*DisplayName, *CurrentTask.TaskID.ToString());
 
 		// 짐을 든 채로 포기하면 물품이 허공에 남는다 — 최소한 부착만 풀어 시야에서 정리한다.
 		PayloadItem->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -235,7 +246,7 @@ void AFactoryTransportRobot::OnMoveFailedPermanently()
 	else
 	{
 		UE_LOG(LogFactoryDispatch, Error, TEXT("[%s] 목적지 도달 불가로 트립(%s)을 포기 — 아직 미적재라 재큐잉함"),
-			*GetName(), *CurrentTask.TaskID.ToString());
+			*DisplayName, *CurrentTask.TaskID.ToString());
 
 		const FTransportTask FailedTask = CurrentTask;
 		CurrentTask = FTransportTask();
@@ -352,7 +363,7 @@ void AFactoryTransportRobot::RetargetCurrentTaskSlot(int32 NewFloorIndex, int32 
 	}
 
 	UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] 짝 아틀라스의 선반칸 재할당에 맞춰 (Floor=%d,Slot=%d)로 재이동"),
-		*GetName(), NewFloorIndex, NewSlotIndex);
+		*DisplayName, NewFloorIndex, NewSlotIndex);
 	TryStartMoveToPoint(Shelf, bIsPickupSide);
 }
 
@@ -394,7 +405,7 @@ void AFactoryTransportRobot::TryStartMoveToPoint(AActor* PointActor, bool bIsPic
 		if (!TripAtlas)
 		{
 			UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] %s 진입 대기 — 아틀라스가 아직 이 트립까지 처리하지 않음(이전 트립 처리 중), %.1f초 후 재확인"),
-				*GetName(), *Tray->GetName(), TrayZoneRetryIntervalSeconds);
+				*DisplayName, *Tray->GetName(), TrayZoneRetryIntervalSeconds);
 			PendingMovePoint = PointActor;
 			bPendingMoveIsPickupSide = bIsPickupSide;
 			GetWorldTimerManager().SetTimer(TrayZoneWaitTimerHandle, this, &AFactoryTransportRobot::RetryMoveToPendingPoint, TrayZoneRetryIntervalSeconds, false);
@@ -404,7 +415,7 @@ void AFactoryTransportRobot::TryStartMoveToPoint(AActor* PointActor, bool bIsPic
 		if (!Tray->TryReserveTransportRobotWorkZone(this))
 		{
 			UE_LOG(LogFactoryDispatch, Log, TEXT("[%s] %s 작업 지점이 이미 점유 중 — %.1f초 후 재시도"),
-				*GetName(), *Tray->GetName(), TrayZoneRetryIntervalSeconds);
+				*DisplayName, *Tray->GetName(), TrayZoneRetryIntervalSeconds);
 			PendingMovePoint = PointActor;
 			bPendingMoveIsPickupSide = bIsPickupSide;
 			GetWorldTimerManager().SetTimer(TrayZoneWaitTimerHandle, this, &AFactoryTransportRobot::RetryMoveToPendingPoint, TrayZoneRetryIntervalSeconds, false);
@@ -416,7 +427,7 @@ void AFactoryTransportRobot::TryStartMoveToPoint(AActor* PointActor, bool bIsPic
 	else if (!Cast<AStorageShelf>(PointActor))
 	{
 		UE_LOG(LogFactoryDispatch, Warning, TEXT("[%s] TryStartMoveToPoint 실패 — PointActor(%s)가 Tray도 Shelf도 아님"),
-			*GetName(), PointActor ? *PointActor->GetName() : TEXT("Invalid"));
+			*DisplayName, PointActor ? *PointActor->GetName() : TEXT("Invalid"));
 		return;
 	}
 
@@ -449,7 +460,7 @@ void AFactoryTransportRobot::ReleaseReservedTrayZone()
 void AFactoryTransportRobot::TriggerBreakdown()
 {
 	SetState(EAgentState::Broken);
-	UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] %s 고장 발생(Broken) — FullRepair 정비 요청"), *GetName());
+	UE_LOG(LogFactoryDispatch, Log, TEXT("[Repair] %s 고장 발생(Broken) — FullRepair 정비 요청"), *DisplayName);
 
 	if (UGameInstance* GI = GetGameInstance())
 	{
