@@ -17,6 +17,11 @@ void UFactoryEventBusSubsystem::PublishTaskLifecycle(const FTaskLifecycleEvent& 
 	OnTaskLifecyclePublished.Broadcast(Event);
 }
 
+void UFactoryEventBusSubsystem::PublishTrainingLogEntry(const FTrainingLogEntry& Entry)
+{
+	OnTrainingLogPublished.Broadcast(Entry);
+}
+
 FDelegateHandle UFactoryEventBusSubsystem::SubscribeAnomaly(const FOnAnomalyEvent::FDelegate& Callback)
 {
 	return OnAnomalyPublished.Add(Callback);
@@ -32,9 +37,15 @@ FDelegateHandle UFactoryEventBusSubsystem::SubscribeTaskLifecycle(const FOnTaskL
 	return OnTaskLifecyclePublished.Add(Callback);
 }
 
+FDelegateHandle UFactoryEventBusSubsystem::SubscribeTrainingLogEntry(const FOnTrainingLogEntry::FDelegate& Callback)
+{
+	return OnTrainingLogPublished.Add(Callback);
+}
+
 void UFactoryEventBusSubsystem::Unsubscribe(FDelegateHandle Handle)
 {
 	OnAnomalyPublished.Remove(Handle);
 	OnSnapshotPublished.Remove(Handle);
 	OnTaskLifecyclePublished.Remove(Handle);
+	OnTrainingLogPublished.Remove(Handle);
 }
